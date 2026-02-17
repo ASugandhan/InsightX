@@ -170,9 +170,19 @@ class SQLGenerator:
             elif 'day_of_week' in parsed.dimensions:
                 return "ORDER BY day_of_week ASC"
         
-        # Segmentation queries: order by count descending
+        # Segmentation queries: order by appropriate metric
         if parsed.dimensions:
-            return "ORDER BY count DESC"
+            # If we have 'count' in metrics, use it
+            if 'count' in parsed.metrics:
+                return "ORDER BY count DESC"
+            # Otherwise, order by the first metric in the SELECT
+            elif parsed.metrics:
+                # Order by the primary metric (first one)
+                primary_metric = parsed.metrics[0]
+                return f"ORDER BY {primary_metric} DESC"
+            # Fallback: order by first dimension
+            else:
+                return f"ORDER BY {parsed.dimensions[0]}"
         
         return ""
     
