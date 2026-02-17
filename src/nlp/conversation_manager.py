@@ -7,11 +7,11 @@ import uuid
 from typing import Dict, Optional
 from datetime import datetime  # ✅ ADD (for staleness check)
 
-from parser import ParsedQuery
-from llm_parser import LLMParser
-from conversation_state import ConversationState
-from context_inheritor import ContextInheritor
-from anaphora_resolver import AnaphoraResolver
+from nlp.parser import ParsedQuery
+from nlp.llm_parser import LLMParser
+from nlp.conversation_state import ConversationState
+from nlp.context_inheritor import ContextInheritor
+from nlp.anaphora_resolver import AnaphoraResolver
 
 
 class ConversationManager:

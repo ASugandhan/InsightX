@@ -5,12 +5,12 @@ import re
 
 
 class QueryIntent(Enum):
-    descriptive = "descriptive"
-    comparative = "comparative"
-    temporal = "temporal"
-    segmentation = "segmentation"
-    risk = "risk"
-    unknown = "unknown"
+    DESCRIPTIVE = "descriptive"
+    COMPARATIVE = "comparative"
+    TEMPORAL = "temporal"
+    SEGMENTATION = "segmentation"
+    RISK = "risk"
+    UNKNOWN = "unknown"
 
 @dataclass
 class ParsedQuery:
@@ -56,12 +56,12 @@ class QueryParser:
     def _detect_intent(self, query):
         """Detect query intent"""
         if any(w in query for w in ['what is', 'show me', 'how many', 'average']):
-            return QueryIntent.descriptive
+            return QueryIntent.DESCRIPTIVE
         elif any(w in query for w in ['compare', 'vs', 'versus']):
-            return QueryIntent.comparative
+            return QueryIntent.COMPARATIVE
         elif any(w in query for w in ['peak', 'trend', 'by hour']):
-            return QueryIntent.temporal
-        return QueryIntent.unknown
+            return QueryIntent.TEMPORAL
+        return QueryIntent.UNKNOWN
     
     def _extract_metrics(self, query):
         """Extract requested metrics"""

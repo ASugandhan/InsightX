@@ -5,8 +5,8 @@ Resolves pronouns like "it", "that", "them" to actual entities
 
 import re
 from typing import Dict, List, Optional
-from parser import ParsedQuery
-from conversation_state import ConversationState
+from nlp.parser import ParsedQuery
+from nlp.conversation_state import ConversationState
 
 
 class AnaphoraResolver:

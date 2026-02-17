@@ -156,35 +156,36 @@ class SQLGenerator:
         return ""
     
     def _build_order_by(self, parsed: ParsedQuery) -> str:
-        """Build ORDER BY clause based on intent"""
-        
-        # Comparative queries: order by first metric descending
-        if parsed.intent == QueryIntent.COMPARATIVE:
-            if parsed.metrics:
-                return f"ORDER BY {parsed.metrics[0]} DESC"
-        
-        # Temporal queries: order by time dimension
+        """Build ORDER BY clause safely (GROUP BY compatible)"""
+
+        # Map metrics to SELECT aliases (ONLY aggregated columns)
+        metric_alias_map = {
+            'avg_amount': 'avg_amount',
+            'total_amount': 'total_amount',
+            'median_amount': 'median_amount',
+            'count': 'count',
+            'success_rate': 'success_rate',
+            'failure_rate': 'failure_rate',
+            'fraud_flag_rate': 'fraud_flag_rate',
+            'min_amount': 'min_amount',
+            'max_amount': 'max_amount',
+        }
+
+        # Always prefer ordering by an aggregated metric
+        if parsed.metrics:
+            metric = parsed.metrics[0]
+            if metric in metric_alias_map:
+                return f"ORDER BY {metric_alias_map[metric]} DESC"
+
+    # Temporal queries (safe because these are GROUP BY dimensions)
         if parsed.intent == QueryIntent.TEMPORAL:
             if 'hour_of_day' in parsed.dimensions:
                 return "ORDER BY hour_of_day ASC"
             elif 'day_of_week' in parsed.dimensions:
                 return "ORDER BY day_of_week ASC"
-        
-        # Segmentation queries: order by appropriate metric
-        if parsed.dimensions:
-            # If we have 'count' in metrics, use it
-            if 'count' in parsed.metrics:
-                return "ORDER BY count DESC"
-            # Otherwise, order by the first metric in the SELECT
-            elif parsed.metrics:
-                # Order by the primary metric (first one)
-                primary_metric = parsed.metrics[0]
-                return f"ORDER BY {primary_metric} DESC"
-            # Fallback: order by first dimension
-            else:
-                return f"ORDER BY {parsed.dimensions[0]}"
-        
+
         return ""
+
     
     def _build_limit(self, parsed: ParsedQuery) -> str:
         """Build LIMIT clause"""

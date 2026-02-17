@@ -3,8 +3,8 @@ Context Inheritance Logic
 Merges previous context with current query
 """
 
-from parser import ParsedQuery, QueryIntent
-from conversation_state import ConversationState
+from nlp.parser import ParsedQuery, QueryIntent
+from nlp.conversation_state import ConversationState
 from typing import Dict, List
 
 

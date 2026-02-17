@@ -6,7 +6,7 @@ Stores conversation history and context
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
-from parser import ParsedQuery
+from nlp.parser import ParsedQuery
 
 @dataclass
 class ConversationTurn:
