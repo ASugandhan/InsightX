@@ -4,6 +4,7 @@ sys.path.append('src')
 
 from analytics.engine import AnalyticsEngine
 from nlp.parser import QueryParser
+from analytics.sql_generator import SQLGenerator 
 from explainability.formatter import ResponseFormatter
 
 class InsightXSystem:
@@ -13,6 +14,7 @@ class InsightXSystem:
         print("="*60)
         
         self.analytics = AnalyticsEngine(csv_path)
+        self.sql_generator = SQLGenerator()
         self.parser = QueryParser()
         self.formatter = ResponseFormatter()
         
@@ -28,8 +30,8 @@ class InsightXSystem:
         print(f"✓ Parsed (confidence: {parsed.confidence:.2f})")
         
         # Generate SQL (simple version for now)
-        sql = self._generate_sql(parsed)
-        print(f"✓ Generated SQL")
+        sql = self.sql_generator.generate(parsed)
+        print(f"✓ Generated SQL: {sql[:80]}...")
         
         # Execute query
         result = self.analytics.query(sql)
