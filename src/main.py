@@ -1,10 +1,9 @@
 import sys
-from pathlib import Path
 sys.path.append('src')
 
 from analytics.engine import AnalyticsEngine
-from nlp.parser import QueryParser
-from analytics.sql_generator import SQLGenerator 
+from analytics.sql_generator import SQLGenerator
+from nlp.conversation_manager import ConversationManager  # NEW
 from explainability.formatter import ResponseFormatter
 
 class InsightXSystem:
@@ -15,30 +14,42 @@ class InsightXSystem:
         
         self.analytics = AnalyticsEngine(csv_path)
         self.sql_generator = SQLGenerator()
-        self.parser = QueryParser()
+        self.conversation_manager = ConversationManager()  # NEW
         self.formatter = ResponseFormatter()
+        
+        # Track current session
+        self.current_session = None  # NEW
         
         print("\n✓ All components initialized!")
         print("="*60)
     
     def ask(self, question: str):
-        """Main entry point: Ask a question, get an answer"""
+        """Main entry point with conversation context"""
         print(f"\n📝 Question: {question}")
         
-        # Parse question
-        parsed = self.parser.parse(question)
-        print(f"✓ Parsed (confidence: {parsed.confidence:.2f})")
+        # Process with conversation context
+        enhanced, self.current_session = self.conversation_manager.process_query(
+            question,
+            self.current_session
+        )
         
-        # Generate SQL (simple version for now)
-        sql = self.sql_generator.generate(parsed)
-        print(f"✓ Generated SQL: {sql[:80]}...")
+        # Show context
+        context = self.conversation_manager.get_context_summary(self.current_session)
+        if context != "No active context":
+            print(f"🔗 Context: {context}")
+        
+        print(f"✓ Parsed (confidence: {enhanced.confidence:.2f})")
+        
+        # Generate SQL
+        sql = self.sql_generator.generate(enhanced)
+        print(f"✓ Generated SQL")
         
         # Execute query
         result = self.analytics.query(sql)
-        print(f"✓ Query executed")
+        print(f"✓ Query executed ({len(result)} rows)")
         
         # Format response
-        response = self.formatter.format(question, result, parsed.confidence)
+        response = self.formatter.format(question, result, enhanced.confidence)
         print(f"✓ Response formatted")
         
         # Display
@@ -52,54 +63,38 @@ class InsightXSystem:
         
         return response
     
-    def _generate_sql(self, parsed):
-        """Simple SQL generator (will improve later)"""
-        
-        # Build SELECT clause
-        if 'avg_amount' in parsed.metrics:
-            select = "SELECT AVG(amount_inr) as avg_amount"
-        elif 'count' in parsed.metrics:
-            select = "SELECT COUNT(*) as count"
-        else:
-            select = "SELECT COUNT(*) as count"
-        
-        # Add FROM
-        sql = select + " FROM transactions"
-        
-        # Add WHERE
-        if parsed.filters:
-            where_parts = []
-            for col, val in parsed.filters.items():
-                if isinstance(val, str):
-                    where_parts.append(f"{col} = '{val}'")
-                else:
-                    where_parts.append(f"{col} = {val}")
-            sql += " WHERE " + " AND ".join(where_parts)
-        
-        return sql
+    def start_fresh(self):
+        """Start a fresh conversation"""
+        if self.current_session:
+            self.conversation_manager.clear_context(self.current_session)
+            print("✓ Context cleared - starting fresh!")
 
-# Test
+
+# ============================================================================
+# MULTI-TURN CONVERSATION TEST
+# ============================================================================
 if __name__ == "__main__":
-    # Initialize system
-    PROJECT_ROOT = Path(__file__).resolve().parents[1]
-    CSV_PATH = PROJECT_ROOT / "data" / "upi_transactions_2024.csv"
-    system = InsightXSystem(CSV_PATH)
+    system = InsightXSystem('data/upi_transactions_2024.csv')
     
-    # Test queries
     print("\n\n" + "="*60)
-    print("TESTING END-TO-END SYSTEM")
+    print("TESTING MULTI-TURN CONVERSATIONS")
     print("="*60)
     
-    test_questions = [
-        "What is the average transaction amount?",
-        "How many P2M transactions are there?",
-        "Show me weekend transactions"
-    ]
+    # Conversation 1: With context
+    print("\n📞 CONVERSATION 1: Context Retention")
+    print("-" * 60)
     
-    for question in test_questions:
-        system.ask(question)
-        print("\n")
+    system.ask("Show me P2P transactions")
+    system.ask("What about weekends?")
+    system.ask("Break down by age group")
     
-    print("="*60)
-    print("✓ ALL END-TO-END TESTS PASSED!")
+    # Conversation 2: Fresh start
+    print("\n📞 CONVERSATION 2: Fresh Start")
+    print("-" * 60)
+    
+    system.ask("Start fresh")
+    system.ask("Compare failure rates by device type")
+    
+    print("\n" + "="*60)
+    print("✓ MULTI-TURN CONVERSATION TEST COMPLETE!")
     print("="*60)
