@@ -1,0 +1,123 @@
+# InsightX - Requirements
+# Python 3.11+
+
+# ============================================================================
+# CORE DEPENDENCIES
+# ============================================================================
+
+# Data Processing
+pandas==2.1.4
+numpy==1.26.3
+
+# Database
+duckdb==0.9.2
+
+# ============================================================================
+# AI & NLP
+# ============================================================================
+
+# Google Gemini (NEW SDK)
+google-genai==0.2.0
+
+# Sentence Transformers (for Day 7 - RAG)
+sentence-transformers==2.3.1
+
+# ============================================================================
+# STATISTICAL ANALYSIS
+# ============================================================================
+
+scipy==1.11.4
+
+# ============================================================================
+# WEB FRAMEWORK (for Day 6 - UI)
+# ============================================================================
+
+# Backend
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# Frontend
+streamlit==1.30.0
+
+# ============================================================================
+# VECTOR DATABASE (for Day 7 - RAG)
+# ============================================================================
+
+chromadb==0.4.22
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Data validation
+pydantic==2.5.3
+
+# ============================================================================
+# TESTING (Optional but Recommended)
+# ============================================================================
+
+pytest==7.4.4
+pytest-cov==4.1.0
+
+# ============================================================================
+# OPTIONAL (For Advanced Features)
+# ============================================================================
+
+# Caching
+redis==5.0.1
+
+# Document creation (already used in Day 2)
+openpyxl==3.1.2
+python-docx==1.1.0
+
+# Visualization (if needed for Day 9)
+matplotlib==3.8.2
+seaborn==0.13.0
+
+# ============================================================================
+# DEVELOPMENT TOOLS (Optional)
+# ============================================================================
+
+# Code formatting
+black==23.12.1
+isort==5.13.2
+
+# Type checking
+mypy==1.7.1
+
+# Linting
+pylint==3.0.3
+flake8==7.0.0
+
+# ============================================================================
+# INSTALLATION NOTES
+# ============================================================================
+
+# Install all dependencies:
+#   pip install -r requirements.txt --break-system-packages
+
+# Install only core dependencies (minimal):
+#   pip install pandas numpy duckdb google-genai scipy python-dotenv
+
+# Install for development:
+#   pip install -r requirements.txt
+#   pip install black isort mypy pylint
+
+# ============================================================================
+# COMPATIBILITY
+# ============================================================================
+
+# Tested on:
+# - Python 3.11+
+# - Windows 11
+# - Ubuntu 22.04+
+# - macOS 13+
+
+# Known Issues:
+# - DuckDB requires Python 3.8+
+# - google-genai requires Python 3.10+
+# - Some packages may require Microsoft C++ Build Tools on Windows

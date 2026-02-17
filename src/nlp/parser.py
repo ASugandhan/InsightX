@@ -2,16 +2,15 @@ from dataclasses import dataclass
 from typing import List, Dict, Optional
 from enum import Enum
 import re
-from warnings import filters
 
-from duckdb import query
-from sklearn import metrics
 
 class QueryIntent(Enum):
-    DESCRIPTIVE = "descriptive"
-    COMPARATIVE = "comparative"
-    TEMPORAL = "temporal"
-    UNKNOWN = "unknown"
+    descriptive = "descriptive"
+    comparative = "comparative"
+    temporal = "temporal"
+    segmentation = "segmentation"
+    risk = "risk"
+    unknown = "unknown"
 
 @dataclass
 class ParsedQuery:
@@ -57,12 +56,12 @@ class QueryParser:
     def _detect_intent(self, query):
         """Detect query intent"""
         if any(w in query for w in ['what is', 'show me', 'how many', 'average']):
-            return QueryIntent.DESCRIPTIVE
+            return QueryIntent.descriptive
         elif any(w in query for w in ['compare', 'vs', 'versus']):
-            return QueryIntent.COMPARATIVE
+            return QueryIntent.comparative
         elif any(w in query for w in ['peak', 'trend', 'by hour']):
-            return QueryIntent.TEMPORAL
-        return QueryIntent.UNKNOWN
+            return QueryIntent.temporal
+        return QueryIntent.unknown
     
     def _extract_metrics(self, query):
         """Extract requested metrics"""
@@ -218,7 +217,7 @@ class QueryParser:
         """Calculate parse confidence"""
         confidence = 0.5
         
-        if intent != QueryIntent.UNKNOWN:
+        if intent != QueryIntent.unknown:
             confidence += 0.3
         if metrics:
             confidence += 0.1

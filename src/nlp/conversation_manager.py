@@ -11,7 +11,7 @@ from parser import ParsedQuery
 from llm_parser import LLMParser
 from conversation_state import ConversationState
 from context_inheritor import ContextInheritor
-from anaphora_resolver import AnaphoraResolver  # ✅ ADD
+from anaphora_resolver import AnaphoraResolver
 
 
 class ConversationManager:
@@ -20,9 +20,9 @@ class ConversationManager:
     def __init__(self):
         self.parser = LLMParser()
         self.inheritor = ContextInheritor()
-        self.anaphora_resolver = AnaphoraResolver()  # ✅ ADD
+        self.anaphora_resolver = AnaphoraResolver()  
         self.sessions: Dict[str, ConversationState] = {}
-        self.default_timeout = 30  # minutes
+        self.default_timeout = 30 
         
         print("✓ Conversation Manager initialized")
     
@@ -41,8 +41,7 @@ class ConversationManager:
             session_id = self._create_session()
         
         state = self._get_or_create_state(session_id)
-        
-        # ✅ ADD: Warn if session context may be stale
+
         if state.turns:
             time_since_last = (datetime.now() - state.last_activity).seconds / 60
             if time_since_last > 15:  # 15 minutes

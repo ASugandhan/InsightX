@@ -3,7 +3,7 @@ sys.path.append('src')
 
 from analytics.engine import AnalyticsEngine
 from analytics.sql_generator import SQLGenerator
-from nlp.conversation_manager import ConversationManager  # NEW
+from nlp.conversation_manager import ConversationManager  
 from explainability.formatter import ResponseFormatter
 
 class InsightXSystem:
