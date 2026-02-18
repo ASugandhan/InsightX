@@ -14,6 +14,9 @@ class SQLGenerator:
     def __init__(self):
         self.table = "transactions"
         print("✓ SQL Generator initialized")
+
+    # Force aggregation for "why" questions
+
     
     def generate(self, parsed: ParsedQuery) -> str:
         """
@@ -25,14 +28,36 @@ class SQLGenerator:
         Returns:
             Valid SQL query string
         """
+        if parsed.intent.name.lower() == "risk" or "why" in parsed.original_query.lower():
+            if parsed.metrics == ["amount_inr"]:
+                parsed.metrics = ["avg_amount"]
         
         # Build SQL parts
-        select_clause = self._build_select(parsed)
+        normalized_metrics = self._normalize_metrics(parsed.metrics)
+        select_clause = self._build_select(
+        ParsedQuery(
+            intent=parsed.intent,
+            metrics=normalized_metrics,
+            dimensions=parsed.dimensions,
+            filters=parsed.filters,
+            original_query=parsed.original_query,
+            confidence=parsed.confidence
+        )
+    )
         from_clause = f"FROM {self.table}"
         where_clause = self._build_where(parsed.filters)
         group_by_clause = self._build_group_by(parsed.dimensions)
         having_clause = self._build_having(parsed)
-        order_by_clause = self._build_order_by(parsed)
+        order_by_clause = self._build_order_by(
+        ParsedQuery(
+            intent=parsed.intent,
+            metrics=normalized_metrics,
+            dimensions=parsed.dimensions,
+            filters=parsed.filters,
+            original_query=parsed.original_query,
+            confidence=parsed.confidence
+        )
+    )
         limit_clause = self._build_limit(parsed)
         
         # Assemble SQL
@@ -102,44 +127,73 @@ class SQLGenerator:
                 select_items.append("ROUND(MAX(amount_inr), 2) as max_amount")
         
         # If no metrics specified, default to count
-        if not any(item.startswith('COUNT') or item.startswith('ROUND') for item in select_items):
+        # Only default to count if metrics list is EMPTY
+        if not parsed.metrics:
             select_items.append("COUNT(*) as count")
-        
+
         return "SELECT " + ", ".join(select_items)
     
     def _build_where(self, filters: Dict) -> str:
-        """Build WHERE clause from filters"""
-        
+        """Build WHERE clause (supports structured operators)"""
+
         if not filters:
             return ""
-        
+
         conditions = []
-        
+
         for col, val in filters.items():
-            if isinstance(val, str):
-                # String values need quotes
-                conditions.append(f"{col} = '{val}'")
-            elif isinstance(val, list):
-                # Multiple values - use IN
-                if all(isinstance(v, str) for v in val):
-                    values = ", ".join([f"'{v}'" for v in val])
-                else:
-                    values = ", ".join([str(v) for v in val])
-                conditions.append(f"{col} IN ({values})")
-            elif isinstance(val, dict):
-                # Range queries
-                if 'min' in val and 'max' in val:
+
+        # 1️⃣ Structured operators
+            if isinstance(val, dict):
+                if 'eq' in val:
+                    conditions.append(f"{col} = '{val['eq']}'")
+                elif 'neq' in val:
+                    conditions.append(f"{col} != '{val['neq']}'")
+                elif 'gt' in val:
+                    conditions.append(f"{col} > {val['gt']}")
+                elif 'lt' in val:
+                    conditions.append(f"{col} < {val['lt']}")
+                elif 'gte' in val:
+                    conditions.append(f"{col} >= {val['gte']}")
+                elif 'lte' in val:
+                    conditions.append(f"{col} <= {val['lte']}")
+                elif 'min' in val and 'max' in val:
                     conditions.append(f"{col} BETWEEN {val['min']} AND {val['max']}")
-                elif 'min' in val:
-                    conditions.append(f"{col} >= {val['min']}")
-                elif 'max' in val:
-                    conditions.append(f"{col} <= {val['max']}")
-            else:
-                # Numeric or boolean
-                conditions.append(f"{col} = {val}")
-        
+
+        # 2️⃣ Numeric / boolean (IMPORTANT)
+            elif isinstance(val, (int, bool)):
+                conditions.append(f"{col} = {int(val)}")
+
+        # 3️⃣ String values
+            elif isinstance(val, str):
+                val_lower = val.lower().strip()
+                BOOLEAN_COLUMNS = {"is_weekend", "fraud_flag"}
+
+                if col in BOOLEAN_COLUMNS:
+                    if val_lower == "true":
+                        conditions.append(f"{col} = 1")
+                    elif val_lower == "false":
+                        conditions.append(f"{col} = 0")
+                    elif " or " in val_lower or " and " in val_lower:
+                        continue
+                    else:
+                        continue
+                else:
+                    conditions.append(f"{col} = '{val}'")
+
+        # 4️⃣ List → IN (...)
+            elif isinstance(val, list):
+                values = ", ".join(
+                    f"'{v}'" if isinstance(v, str) else str(v)
+                    for v in val
+                )
+                conditions.append(f"{col} IN ({values})")
+
+        if not conditions:
+            return ""
+
         return "WHERE " + " AND ".join(conditions)
-    
+
     def _build_group_by(self, dimensions: List[str]) -> str:
         """Build GROUP BY clause"""
         
@@ -172,9 +226,8 @@ class SQLGenerator:
         }
 
         # Always prefer ordering by an aggregated metric
-        if parsed.metrics:
-            metric = parsed.metrics[0]
-            if metric in metric_alias_map:
+        for metric in parsed.metrics:
+            if isinstance(metric, str) and metric in metric_alias_map:
                 return f"ORDER BY {metric_alias_map[metric]} DESC"
 
     # Temporal queries (safe because these are GROUP BY dimensions)
@@ -203,6 +256,76 @@ class SQLGenerator:
         sql_upper = sql.upper()
         
         return all(keyword in sql_upper for keyword in required)
+    
+    def _normalize_metrics(self, metrics):
+        """
+        Convert metrics into a uniform string-based format
+        Supports legacy (str), SQL-like (AVG(col)), and dict formats
+        """
+        normalized = []
+
+        for m in metrics:
+
+        # -----------------------------
+        # CASE 1: Dict-based metrics
+        # -----------------------------
+            if isinstance(m, dict):
+                agg = m.get("aggregation")
+                name = m.get("name")
+
+                if agg in ("average", "avg") and name == "amount_inr":
+                    normalized.append("avg_amount")
+
+                elif agg == "sum" and name == "amount_inr":
+                    normalized.append("total_amount")
+
+                elif agg == "count":
+                    normalized.append("count")
+
+                elif agg == "min" and name == "amount_inr":
+                    normalized.append("min_amount")
+
+                elif agg == "max" and name == "amount_inr":
+                    normalized.append("max_amount")
+
+        # -----------------------------
+        # CASE 2: String-based metrics
+        # -----------------------------
+            elif isinstance(m, str):
+                m_lower = m.lower().strip()
+
+                if m_lower in (
+                    "avg(amount_inr)",
+                    "average(amount_inr)",
+                    "average_amount_inr",
+                    "avg_amount"
+                ):
+                    normalized.append("avg_amount")
+
+                elif m_lower in (
+                    "sum(amount_inr)",
+                    "total(amount_inr)",
+                    "total_amount"
+                ):
+                    normalized.append("total_amount")
+
+                elif m_lower in ("count", "count(*)"):
+                    normalized.append("count")
+
+                elif m_lower == "amount_inr":
+                    # IMPORTANT: prevent fallback to COUNT(*)
+                    normalized.append("avg_amount")
+
+                else:
+                    normalized.append(m)
+
+        # -----------------------------
+        # CASE 3: Anything unexpected
+        # -----------------------------
+            else:
+                normalized.append(m)
+
+        return normalized
 
 
 # ============================================================================

@@ -4,6 +4,7 @@ Statistical Analyzer - Provides statistical rigor to query results
 
 import pandas as pd
 import numpy as np
+import warnings
 from scipy import stats
 from typing import Dict, Tuple, Optional
 
@@ -242,7 +243,7 @@ class StatisticalAnalyzer:
             return 'medium'
         else:
             return 'low'
-    
+        
     def _classify_distribution(self, data: pd.Series) -> str:
         """Classify distribution shape"""
         skewness = data.skew()

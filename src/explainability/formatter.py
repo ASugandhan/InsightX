@@ -4,6 +4,7 @@ Complete Response Formatter with 3-Tier Explainability
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional
+from unittest import result
 import pandas as pd
 import sys
 sys.path.append('..')
@@ -39,6 +40,13 @@ class ResponseFormatter:
         self.translator = PlainLanguageTranslator()
         
         print("✓ Response Formatter initialized (Full explainability)")
+
+    def _normalize_metrics(self, metrics):
+        return [
+            m if isinstance(m, str)
+            else m.get("alias", "")
+            for m in metrics
+        ]
     
     def format(self,
                query: str,
@@ -65,9 +73,8 @@ class ResponseFormatter:
         Returns:
             Complete Response object
         """
-        
+        metrics = self._normalize_metrics(metrics or [])
         filters = filters or {}
-        metrics = metrics or []
         
         # TIER 1: Always visible
         tier1 = self._format_tier1(query, result, filters, baseline)
@@ -130,48 +137,56 @@ class ResponseFormatter:
         )
     
     def _format_tier1(self,
-                     query: str,
-                     result: pd.DataFrame,
-                     filters: Dict,
-                     baseline: pd.DataFrame = None) -> str:
+                  query: str,
+                  result: pd.DataFrame,
+                  filters: Dict,
+                  baseline: pd.DataFrame = None) -> str:
         """Format Tier 1 - Always visible answer"""
-        
+
         lines = []
-        
-        # Main answer
-        if len(result) == 1 and len(result.columns) == 1:
-            # Single value result
-            col = result.columns[0]
-            value = result.iloc[0, 0]
-            
-            # Format based on column type
-            if 'amount' in col.lower():
-                lines.append(f"💰 {self._humanize_column(col)}: ₹{value:,.2f}")
-            elif 'rate' in col.lower():
-                lines.append(f"📊 {self._humanize_column(col)}: {value:.2f}%")
-            elif 'count' in col.lower():
-                lines.append(f"📈 {self._humanize_column(col)}: {value:,.0f} transactions")
-            else:
-                lines.append(f"📌 {self._humanize_column(col)}: {value:,.2f}")
-        
+
+    # CASE 1: Single aggregated result
+        if len(result) == 1:
+            # Prefer amount / rate over count
+            priority = ["avg_amount", "total_amount", "success_rate",
+                        "failure_rate", "fraud_flag_rate", "count"]
+
+            for metric in priority:
+                if metric in result.columns:
+                    value = result[metric].iloc[0]
+
+                    if "amount" in metric:
+                        lines.append(
+                            f"💰 {self._humanize_column(metric)}: ₹{value:,.2f}"
+                        )
+                    elif "rate" in metric:
+                        lines.append(
+                            f"📊 {self._humanize_column(metric)}: {value:.2f}%"
+                        )
+                    else:
+                        lines.append(
+                            f"📈 {self._humanize_column(metric)}: {value:,.0f} transactions"
+                        )
+                    break
+
+    # CASE 2: Small grouped result
         elif len(result) <= 10:
-            # Small result set - show table
             lines.append("📊 Results:\n")
             lines.append(result.to_string(index=False))
-        
+
+    # CASE 3: Large result
         else:
-            # Large result set - show summary
             lines.append(f"📊 Found {len(result):,} records")
-            lines.append(f"\nTop 10 results:")
+            lines.append("\nTop 10 results:")
             lines.append(result.head(10).to_string(index=False))
-        
-        # Key insight
+
+    # Key insight
         insight = self._generate_key_insight(result, filters, baseline)
         if insight:
             lines.append(f"\n\n💡 Key Insight: {insight}")
-        
+
         return "\n".join(lines)
-    
+
     def _format_context_comparison(self,
                                    result: pd.DataFrame,
                                    baseline: pd.DataFrame,
@@ -224,17 +239,38 @@ class ResponseFormatter:
         
         # Check for interesting patterns in grouped data
         if len(result) > 1:
-            for col in result.columns:
-                if pd.api.types.is_numeric_dtype(result[col]):
-                    # Find max category
-                    max_idx = result[col].idxmax()
-                    max_val = result[col].iloc[max_idx]
-                    
-                    # Get category name (first non-numeric column)
-                    category_col = [c for c in result.columns if not pd.api.types.is_numeric_dtype(result[c])][0]
-                    category_name = result[category_col].iloc[max_idx]
-                    
-                    return f"{category_name} has the highest {self._humanize_column(col)} ({max_val:,.2f})"
+            numeric_cols = [
+                c for c in result.columns
+                if pd.api.types.is_numeric_dtype(result[c])
+            ]
+
+            categorical_cols = [
+                c for c in result.columns
+               if not pd.api.types.is_numeric_dtype(result[c])
+            ]
+
+        # Case 1: Numeric + categorical → normal insight
+            if numeric_cols and categorical_cols:
+                metric_col = numeric_cols[0]
+                category_col = categorical_cols[0]
+
+                max_idx = result[metric_col].idxmax()
+                max_val = result.loc[max_idx, metric_col]
+                category_val = result.loc[max_idx, category_col]
+
+                return (
+                    f"{category_val} has the highest "
+                    f"{self._humanize_column(metric_col)} ({max_val:,.0f})"
+                )
+
+        # Case 2: Only numeric (like is_weekend = 0/1)
+            if numeric_cols and not categorical_cols:
+                metric_col = numeric_cols[-1]
+                return (
+                    f"Transactions vary significantly across values of "
+                    f"{self._humanize_column(metric_col)}"
+                )
+
         
         return None
     
@@ -248,14 +284,12 @@ class ResponseFormatter:
             return "LOW ⚠️"
     
     def _get_sample_size(self, result: pd.DataFrame) -> int:
-        """Get meaningful sample size"""
-        if len(result) == 1:
-            # Check if there's a count column
-            count_cols = [c for c in result.columns if 'count' in c.lower()]
-            if count_cols:
-                return int(result[count_cols[0]].iloc[0])
-        
+    # Use COUNT only if it is the ONLY metric
+        if list(result.columns) == ["count"]:
+            return int(result["count"].iloc[0])
+        # Grouped queries → number of groups
         return len(result)
+
     
     def _humanize_column(self, col: str) -> str:
         """Convert column name to human-readable"""

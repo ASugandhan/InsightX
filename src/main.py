@@ -98,6 +98,7 @@ class InsightXSystem:
         # Display hypotheses if relevant
         if "why" in question.lower() and response.hypotheses and "No specific" not in response.hypotheses:
             print(f"\n{response.hypotheses}")
+            return response
         
         print(f"{'='*60}")
         

@@ -137,7 +137,7 @@ class LLMParser:
 
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
-            self.model = "models/gemini-flash-latest"
+            self.model = "models/gemini-flash-lite-latest"
             print("✓ LLM Parser initialized (Gemini Flash - NEW SDK)")
         else:
             self.client = None
@@ -163,25 +163,86 @@ class LLMParser:
             return fallback
 
     def _llm_parse(self, query: str) -> ParsedQuery:
+        """Parse using Gemini LLM with retry logic"""
+    
         prompt = self._build_prompt(query)
+    
+        # Retry logic for rate limits
+        import time
+        max_retries = 3
+        last_error = None
+    
+        for attempt in range(max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model,
+                    contents=prompt
+                )
+            
+            # Success! Process response
+                text = response.text.strip()
+                text = text.replace("```json", "").replace("```", "").strip()
+                result = json.loads(text)
+            
+            # ✅ NORMALIZE METRICS FORMAT
+                metrics = result.get("metrics", [])
+                normalized_metrics = []
 
-        response = self.client.models.generate_content(
-            model=self.model,
-            contents=prompt
-        )
+                for metric in metrics:
+                    if isinstance(metric, dict):
+                        # Gemini returned dict: {'aggregation': 'avg', 'column': 'amount_inr'}
+                        agg = metric.get('aggregation', '').lower()
+                        col = metric.get('column', '').lower()
+                    
+                    # Map to expected format
+                        if agg == 'avg' and 'amount' in col:
+                            normalized_metrics.append('avg_amount')
+                        elif agg == 'sum' and 'amount' in col:
+                            normalized_metrics.append('total_amount')
+                        elif agg == 'count':
+                            normalized_metrics.append('count')
+                        elif agg == 'median' and 'amount' in col:
+                            normalized_metrics.append('median_amount')
+                        elif agg and col:
+                            normalized_metrics.append(f"{agg}_{col.replace('_inr', '')}")
+                    else:
+                        # Already string format
+                        normalized_metrics.append(str(metric))
+            
+            # Fallback to original if normalization failed
+                if not normalized_metrics and metrics:
+                    normalized_metrics = [str(m) for m in metrics]
 
-        text = response.text.strip()
-        text = text.replace("```json", "").replace("```", "").strip()
-        result = json.loads(text)
+                # If still no metrics, use count as default
+                if not normalized_metrics:
+                    normalized_metrics = ['count']
 
-        return ParsedQuery(
-            intent=QueryIntent(result["intent"]),
-            metrics=result["metrics"],
-            dimensions=result["dimensions"],
-            filters=result["filters"],
-            original_query=query,
-            confidence=result.get("confidence", 0.9)
-        )
+                return ParsedQuery(
+                    intent=QueryIntent(result["intent"]),
+                    metrics=normalized_metrics,
+                    dimensions=result["dimensions"],
+                    filters=result["filters"],
+                    original_query=query,
+                    confidence=result.get("confidence", 0.9)
+                )
+
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+            
+            # Check if it's a rate limit error
+                if '503' in error_str or 'UNAVAILABLE' in error_str or 'high demand' in error_str.lower():
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 3  # 3s, 6s, 9s
+                        print(f"⏳ Gemini rate limited, retrying in {wait_time}s... (attempt {attempt + 2}/{max_retries})")
+                        time.sleep(wait_time)
+                        continue
+            
+                # Not a rate limit error, or final attempt - raise it
+                raise
+    
+        # All retries failed
+        raise last_error
 
     def _build_prompt(self, query: str) -> str:
         return f"""
