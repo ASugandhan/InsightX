@@ -6,15 +6,31 @@ Uses RAG context to enhance query parsing
 from typing import Dict, List, Tuple
 from nlp.parser import ParsedQuery, QueryIntent
 from rag.rag_retriever import RAGRetriever
-
+from chromadb.utils import embedding_functions
 
 class QueryEnhancer:
     """Enhance queries with RAG context"""
     
-    def __init__(self, persist_directory: str = "../data/chroma_db"):
+    def __init__(self, persist_directory: str = "../data/chroma_db", analytics_engine=None):
         """Initialize query enhancer"""
-        
-        self.retriever = RAGRetriever(persist_directory)
+
+        # Store engine (can be None safely)
+        self.analytics_engine = analytics_engine
+
+        # Create retriever properly
+        self.retriever = RAGRetriever(
+            persist_directory=persist_directory,
+            analytics_engine=analytics_engine
+        )
+
+        # Use SAME embedding function as Chroma
+        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+
+        # Access Chroma collection safely
+        self.collection = self.retriever.get_collection()
+
         print("✓ Query Enhancer initialized")
     
     def enhance_parsed_query(self, query: str, parsed: ParsedQuery) -> Tuple[ParsedQuery, str]:
@@ -44,6 +60,11 @@ class QueryEnhancer:
         """Apply context-based enhancements"""
         
         query_lower = query.lower()
+        # Guard: WHY queries must not change execution scope
+        is_why_query = (
+            parsed.intent == QueryIntent.RISK
+            or "why" in parsed.original_query.lower()
+        )
         
         # Start with original parsed query
         enhanced_filters = parsed.filters.copy()
@@ -51,28 +72,36 @@ class QueryEnhancer:
         enhanced_dimensions = parsed.dimensions.copy()
         confidence_boost = 0.0
         
-        # Enhancement 1: Resolve "high-value" threshold
-        if any(word in query_lower for word in ['high', 'expensive', 'costly', 'large', 'big']):
-            if 'amount' in query_lower or 'value' in query_lower or 'transaction' in query_lower:
-                # Check if we found the threshold in context
-                for ctx in context['schema_context']:
-                    if '5000' in ctx or '5,000' in ctx:
-                        # Add threshold filter if not already present
-                        if 'amount_inr' not in enhanced_filters:
-                            enhanced_filters['amount_inr'] = {'min': 5000}
-                            confidence_boost += 0.15
-                        break
-        
-        # Enhancement 2: Resolve "low-value" threshold
-        if any(word in query_lower for word in ['low', 'cheap', 'small', 'micro']):
-            if 'amount' in query_lower or 'value' in query_lower or 'transaction' in query_lower:
-                for ctx in context['schema_context']:
-                    if '500' in ctx or 'micro' in ctx.lower():
-                        if 'amount_inr' not in enhanced_filters:
-                            enhanced_filters['amount_inr'] = {'max': 500}
-                            confidence_boost += 0.15
-                        break
-        
+        thresholds = self._learn_amount_thresholds()
+
+        # High-value detection
+        if any(w in query_lower for w in ["high", "large", "expensive", "costly"]):
+            if "amount" in query_lower or "transaction" in query_lower:
+                if not is_why_query:
+                    # ✅ User explicitly asking → apply filter
+                    if "amount_inr" not in enhanced_filters:
+                        enhanced_filters["amount_inr"] = {"min": thresholds["high"]}
+                        confidence_boost += 0.15
+                else:
+                    # ❌ WHY query → suggest only
+                    context.setdefault("suggested_hypotheses", []).append(
+                        f"High-value transactions (top 10%, ≥ ₹{thresholds['high']}) may be influencing the average"
+                    )
+                    confidence_boost += 0.05
+
+        # Low-value detection
+        if any(w in query_lower for w in ["low", "cheap", "small", "micro"]):
+            if "amount" in query_lower or "transaction" in query_lower:
+                if not is_why_query:
+                    if "amount_inr" not in enhanced_filters:
+                        enhanced_filters["amount_inr"] = {"max": thresholds["low"]}
+                        confidence_boost += 0.15
+                else:
+                    context.setdefault("suggested_hypotheses", []).append(
+                        f"Low-value transactions (bottom 10%, ≤ ₹{thresholds['low']}) may affect the distribution"
+                    )
+                    confidence_boost += 0.05
+
         # Enhancement 3: Resolve "peak hours"
         if 'peak' in query_lower or 'busy' in query_lower or 'busiest' in query_lower:
             if 'hour' in query_lower or 'time' in query_lower:
@@ -161,26 +190,65 @@ class QueryEnhancer:
             boost = (enhanced.confidence - original.confidence) * 100
             changes.append(f"Confidence boosted by {boost:.0f}%")
         
+        # Suggested hypotheses (not applied as filters)
+        if "suggested_hypotheses" in context:
+            for h in context["suggested_hypotheses"]:
+                changes.append(f"Suggested hypothesis: {h}")
+        
         if not changes:
             return "No enhancements applied"
         
         return " | ".join(changes)
     
     def _query_similarity(self, query1: str, query2: str) -> float:
-        """Calculate simple query similarity"""
-        
-        # Simple word overlap similarity
-        words1 = set(query1.lower().split())
-        words2 = set(query2.lower().split())
-        
-        if not words1 or not words2:
-            return 0.0
-        
-        overlap = len(words1 & words2)
-        total = len(words1 | words2)
-        
-        return overlap / total if total > 0 else 0.0
+        """
+        Semantic similarity using Chroma embeddings (cosine distance)
+        """
 
+        try:
+            emb1 = self.embedding_fn([query1])[0]
+            emb2 = self.embedding_fn([query2])[0]
+
+            # cosine similarity
+            dot = sum(a * b for a, b in zip(emb1, emb2))
+            norm1 = sum(a * a for a in emb1) ** 0.5
+            norm2 = sum(b * b for b in emb2) ** 0.5
+
+            return dot / (norm1 * norm2)
+
+        except Exception:
+            # Fallback lexical similarity
+            w1, w2 = set(query1.split()), set(query2.split())
+            return len(w1 & w2) / max(len(w1 | w2), 1)
+    
+    def _learn_amount_thresholds(self) -> Dict[str, int]:
+        """
+        Learn thresholds from dataset using percentiles
+        """
+
+        try:
+            engine = self.retriever.get_engine()
+
+            if engine is None:
+                return {"high": 5000, "low": 500}
+
+            df = engine.conn.execute("""
+                SELECT amount_inr FROM transactions
+            """).df()
+
+            high = int(df["amount_inr"].quantile(0.90))
+            low = int(df["amount_inr"].quantile(0.10))
+
+            return {
+                "high": high,
+                "low": low
+            }
+
+        except Exception:
+            return {
+                "high": 5000,
+                "low": 500
+            }   
 
 # ============================================================================
 # TESTING

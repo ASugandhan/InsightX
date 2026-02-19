@@ -133,7 +133,7 @@ class LLMParser:
 
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
-            self.model = "models/gemini-flash-lite-latest"
+            self.model = "models/gemini-flash-latest"
             print("✓ LLM Parser initialized (Gemini Flash - NEW SDK)")
         else:
             self.client = None
@@ -147,7 +147,10 @@ class LLMParser:
         # -------------------------------------------------
         if RAG_AVAILABLE:
             try:
-                self.query_enhancer = QueryEnhancer()
+                self.query_enhancer = QueryEnhancer(
+                    persist_directory="../data/chroma_db",
+                    analytics_engine=self.analytics_engine if hasattr(self, "analytics_engine") else None
+                    )
                 print("✓ RAG enhancement enabled")
             except Exception as e:
                 print(f"⚠️ RAG unavailable: {e}")

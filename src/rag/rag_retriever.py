@@ -6,25 +6,48 @@ Retrieves relevant context from schema and examples
 from typing import List, Dict, Optional
 from rag.schema_embedder import SchemaEmbedder
 from rag.example_library import ExampleLibrary
-
+import chromadb
+from chromadb.utils import embedding_functions           
 
 class RAGRetriever:
     """Retrieve relevant context for query enhancement"""
     
-    def __init__(self, persist_directory: str = "../data/chroma_db"):
-        """Initialize RAG retriever"""
-        
-        print("Initializing RAG Retriever...")
-        
-        # Initialize components
+    def __init__(self, persist_directory, analytics_engine=None):
+        self.analytics_engine = analytics_engine
+
+        # Embedding function (shared across system)
+        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+
+        # Chroma client
+        self.client = chromadb.Client(
+            chromadb.config.Settings(
+                persist_directory=persist_directory,
+                anonymized_telemetry=False
+            )
+        )
+
+        # Main collection (used by RAG + similarity)
+        self.collection = self.client.get_or_create_collection(
+            name="insightx_rag",
+            embedding_function=self.embedding_fn
+        )
+
+        # Existing components
         self.schema_embedder = SchemaEmbedder(persist_directory)
         self.example_library = ExampleLibrary(persist_directory)
-        
-        # Ensure data is loaded
-        self.schema_embedder.embed_schema()
-        self.example_library.load_examples()
-        
-        print("✓ RAG Retriever initialized")
+
+        print("✓ RAG Retriever initialized (collection + engine attached)")
+    
+    def get_collection(self):
+        """Expose Chroma collection safely"""
+        return self.collection
+
+
+    def get_engine(self):
+        """Expose analytics engine (read-only usage)"""
+        return self.analytics_engine
     
     def retrieve_context(self, query: str, n_schema: int = 5, n_examples: int = 3) -> Dict:
         """
