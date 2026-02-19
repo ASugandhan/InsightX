@@ -10,10 +10,15 @@ import re
 from enum import Enum
 from typing import List, Dict
 from dataclasses import dataclass
+from nlp.parser import QueryIntent
 
 from google import genai
 from dotenv import load_dotenv
-
+try:
+    from rag.query_enhancer import QueryEnhancer
+    RAG_AVAILABLE = True
+except Exception as e:
+    RAG_AVAILABLE = False
 # -----------------------------------------------------------------------------
 # ENV SETUP
 # -----------------------------------------------------------------------------
@@ -22,15 +27,6 @@ load_dotenv()
 # -----------------------------------------------------------------------------
 # DATA STRUCTURES
 # -----------------------------------------------------------------------------
-
-class QueryIntent(Enum):
-    descriptive = "descriptive"
-    comparative = "comparative"
-    temporal = "temporal"
-    segmentation = "segmentation"
-    correlation = "correlation"
-    risk = "risk"
-
 
 @dataclass
 class ParsedQuery:
@@ -52,18 +48,18 @@ class QueryParser:
     def parse(self, query: str) -> ParsedQuery:
         q = query.lower()
 
-        intent = QueryIntent.descriptive
+        intent = QueryIntent.DESCRIPTIVE
         metrics, dimensions, filters = [], [], {}
 
         # ---- Intent ----
         if any(w in q for w in ["compare", "difference", "which is higher"]):
-            intent = QueryIntent.comparative
+            intent = QueryIntent.COMPARATIVE
         elif any(w in q for w in ["trend", "over time", "peak", "by hour"]):
-            intent = QueryIntent.temporal
+            intent = QueryIntent.TEMPORAL
         elif any(w in q for w in ["break down", "group by"]):
-            intent = QueryIntent.segmentation
+            intent = QueryIntent.SEGMENTATION
         elif "fraud" in q:
-            intent = QueryIntent.risk
+            intent = QueryIntent.RISK
 
         # ---- Metrics ----
         if "average" in q or "avg" in q:
@@ -146,21 +142,53 @@ class LLMParser:
         self.fallback_parser = QueryParser()
         self.schema = self._load_schema()
 
+        # -------------------------------------------------
+        # RAG Enhancer (optional, non-blocking)
+        # -------------------------------------------------
+        if RAG_AVAILABLE:
+            try:
+                self.query_enhancer = QueryEnhancer()
+                print("✓ RAG enhancement enabled")
+            except Exception as e:
+                print(f"⚠️ RAG unavailable: {e}")
+                self.query_enhancer = None
+        else:
+            self.query_enhancer = None
+
     def parse(self, query: str, use_llm: bool = True) -> ParsedQuery:
+    # ---------- LLM path ----------
         if use_llm and self.client:
             try:
                 parsed = self._llm_parse(query)
                 parsed.confidence = max(parsed.confidence, 0.85)
+
+                # 🔍 RAG Enhancement (LLM output)
+                if self.query_enhancer:
+                    enhanced, explanation = self.query_enhancer.enhance_parsed_query(query, parsed)
+                    if explanation != "No enhancements applied":
+                        print(f"🔍 RAG: {explanation}")
+                    return enhanced
+
                 return parsed
+
             except Exception as e:
                 print("⚠️ Gemini error:", e)
                 fallback = self.fallback_parser.parse(query)
                 fallback.confidence = 0.6
+
+                if self.query_enhancer:
+                    fallback, _ = self.query_enhancer.enhance_parsed_query(query, fallback)
+
                 return fallback
-        else:
-            fallback = self.fallback_parser.parse(query)
-            fallback.confidence = 0.6
-            return fallback
+
+        # ---------- No LLM path ----------
+        fallback = self.fallback_parser.parse(query)
+        fallback.confidence = 0.6
+
+        if self.query_enhancer:
+            fallback, _ = self.query_enhancer.enhance_parsed_query(query, fallback)
+
+        return fallback
 
     def _llm_parse(self, query: str) -> ParsedQuery:
         """Parse using Gemini LLM with retry logic"""
@@ -189,9 +217,16 @@ class LLMParser:
                 normalized_metrics = []
 
                 for metric in metrics:
+                    if isinstance(metric, str) and metric.startswith("{"):
+                        try:
+                            import ast
+                            metric = ast.literal_eval(metric)
+                        except:
+                            pass
+                        
                     if isinstance(metric, dict):
                         # Gemini returned dict: {'aggregation': 'avg', 'column': 'amount_inr'}
-                        agg = metric.get('aggregation', '').lower()
+                        agg = (metric.get('function', '') or metric.get('aggregation', '')).lower()
                         col = metric.get('column', '').lower()
                     
                     # Map to expected format

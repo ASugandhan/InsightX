@@ -23,7 +23,8 @@ class InsightXSystem:
         
         # Track current session
         self.current_session = None
-        
+        self._last_caveats = "" 
+
         print("\n✓ All components initialized!")
         print("="*60)
     
@@ -74,7 +75,8 @@ class InsightXSystem:
             filters=enhanced.filters,
             metrics=enhanced.metrics,
             execution_time_ms=execution_time_ms,
-            baseline=baseline
+            baseline=baseline,
+            analytics_engine=self.analytics
         )
         
         print(f"✓ Response formatted")
@@ -92,8 +94,13 @@ class InsightXSystem:
             print(f"\n{response.context_comparison}")
         
         # Display caveats
-        if response.caveats and "No significant" not in response.caveats:
+        if (
+            response.caveats
+            and "No significant" not in response.caveats
+            and response.caveats != self._last_caveats
+        ):
             print(f"\n{response.caveats}")
+            self._last_caveats = response.caveats
         
         # Display hypotheses if relevant
         if "why" in question.lower() and response.hypotheses and "No specific" not in response.hypotheses:

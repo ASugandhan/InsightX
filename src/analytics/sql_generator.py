@@ -84,67 +84,130 @@ class SQLGenerator:
     
     def _build_select(self, parsed: ParsedQuery) -> str:
         """Build SELECT clause with dimensions and metrics"""
-        
+
         select_items = []
-        
+
+        # ---------------------------------------------------------
         # Add dimensions (for GROUP BY)
+        # ---------------------------------------------------------
         for dim in parsed.dimensions:
             select_items.append(dim)
-        
-        # Add metrics with appropriate aggregations
+
+        # ---------------------------------------------------------
+        # Normalize metrics (support RAG + LLM + legacy)
+        # ---------------------------------------------------------
+        normalized_metrics = []
+
         for metric in parsed.metrics:
+
+            # -----------------------------
+            # CASE 1: Dict-based metric
+            # -----------------------------
+            if isinstance(metric, dict):
+
+                # Detect aggregation
+                agg = (
+                    metric.get("aggregation")
+                    or metric.get("function")
+                    or metric.get("name")          # ← RAG format
+                    or ""
+                ).lower()
+
+                # Detect column
+                col = (
+                    metric.get("column")
+                    or metric.get("field")         # ← RAG format
+                    or ""
+                ).lower()
+
+                # Normalize to internal metric names
+                if agg in ("avg", "average", "mean") and col == "amount_inr":
+                    normalized_metrics.append("avg_amount")
+
+                elif agg in ("sum", "total") and col == "amount_inr":
+                    normalized_metrics.append("total_amount")
+
+                elif agg == "count":
+                    normalized_metrics.append("count")
+
+                elif agg == "min" and col == "amount_inr":
+                    normalized_metrics.append("min_amount")
+
+                elif agg == "max" and col == "amount_inr":
+                    normalized_metrics.append("max_amount")
+
+            # -----------------------------
+            # CASE 2: String-based metric
+            # -----------------------------
+            elif isinstance(metric, str):
+                normalized_metrics.append(metric)
+
+        # ---------------------------------------------------------
+        # Default fallback (safety)
+        # ---------------------------------------------------------
+        if not normalized_metrics:
+            normalized_metrics.append("count")
+
+        # ---------------------------------------------------------
+        # Build SELECT expressions
+        # ---------------------------------------------------------
+        for metric in normalized_metrics:
+
             if metric == 'avg_amount':
                 select_items.append("ROUND(AVG(amount_inr), 2) as avg_amount")
-            
+
             elif metric == 'total_amount':
                 select_items.append("ROUND(SUM(amount_inr), 2) as total_amount")
-            
+
             elif metric == 'median_amount':
                 select_items.append("ROUND(MEDIAN(amount_inr), 2) as median_amount")
-            
+
             elif metric == 'count':
                 select_items.append("COUNT(*) as count")
-            
+
             elif metric == 'success_rate':
-                select_items.append("""
-                    ROUND(SUM(CASE WHEN transaction_status = 'SUCCESS' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as success_rate
-                """.strip())
-            
+                select_items.append(
+                    "ROUND(SUM(CASE WHEN transaction_status = 'SUCCESS' THEN 1 ELSE 0 END) "
+                    "* 100.0 / COUNT(*), 2) as success_rate"
+                )   
+
             elif metric == 'failure_rate':
-                select_items.append("""
-                    ROUND(SUM(CASE WHEN transaction_status = 'FAILED' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) as failure_rate
-                """.strip())
-            
+                select_items.append(
+                    "ROUND(SUM(CASE WHEN transaction_status = 'FAILED' THEN 1 ELSE 0 END) "
+                    "* 100.0 / COUNT(*), 2) as failure_rate"
+                )
+
             elif metric == 'fraud_flag_rate':
-                select_items.append("""
-                    ROUND(SUM(fraud_flag) * 100.0 / COUNT(*), 2) as fraud_flag_rate
-                """.strip())
-            
+                select_items.append(
+                    "ROUND(SUM(fraud_flag) * 100.0 / COUNT(*), 2) as fraud_flag_rate"
+                )
+
             elif metric == 'min_amount':
                 select_items.append("ROUND(MIN(amount_inr), 2) as min_amount")
-            
+
             elif metric == 'max_amount':
                 select_items.append("ROUND(MAX(amount_inr), 2) as max_amount")
-        
-        # If no metrics specified, default to count
-        # Only default to count if metrics list is EMPTY
-        if not parsed.metrics:
-            select_items.append("COUNT(*) as count")
+
+        if not select_items:
+            raise ValueError(
+                f"SQLGenerator: No metrics or dimensions resolved. Parsed metrics: {parsed.metrics}"
+            )
 
         return "SELECT " + ", ".join(select_items)
     
     def _build_where(self, filters: Dict) -> str:
-        """Build WHERE clause (supports structured operators)"""
-
+        """Build WHERE clause (supports structured operators + min/max ranges)"""
+    
         if not filters:
             return ""
-
+    
         conditions = []
 
         for col, val in filters.items():
-
-        # 1️⃣ Structured operators
+        
+        # 1️⃣ Structured operators (dict)
             if isinstance(val, dict):
+                # Explicit operators
                 if 'eq' in val:
                     conditions.append(f"{col} = '{val['eq']}'")
                 elif 'neq' in val:
@@ -157,18 +220,37 @@ class SQLGenerator:
                     conditions.append(f"{col} >= {val['gte']}")
                 elif 'lte' in val:
                     conditions.append(f"{col} <= {val['lte']}")
+            
+            # ✅ CRITICAL FIX: Handle min/max (RAG uses this!)
                 elif 'min' in val and 'max' in val:
                     conditions.append(f"{col} BETWEEN {val['min']} AND {val['max']}")
-
-        # 2️⃣ Numeric / boolean (IMPORTANT)
+                elif 'min' in val:
+                    conditions.append(f"{col} >= {val['min']}")  # ✅ ADD THIS
+                elif 'max' in val:
+                    conditions.append(f"{col} <= {val['max']}")  # ✅ ADD THIS
+            
+            # Operator field
+                elif 'operator' in val:
+                    op = val['operator']
+                    value = val['value']
+                    if op == 'eq':
+                        conditions.append(f"{col} = '{value}'")
+                    elif op == 'neq':
+                        conditions.append(f"{col} != '{value}'")
+                    elif op == 'gt':
+                        conditions.append(f"{col} > {value}")
+                    elif op == 'lt':
+                        conditions.append(f"{col} < {value}")
+        
+        # 2️⃣ Numeric / boolean
             elif isinstance(val, (int, bool)):
                 conditions.append(f"{col} = {int(val)}")
-
+        
         # 3️⃣ String values
             elif isinstance(val, str):
                 val_lower = val.lower().strip()
                 BOOLEAN_COLUMNS = {"is_weekend", "fraud_flag"}
-
+            
                 if col in BOOLEAN_COLUMNS:
                     if val_lower == "true":
                         conditions.append(f"{col} = 1")
@@ -180,7 +262,7 @@ class SQLGenerator:
                         continue
                 else:
                     conditions.append(f"{col} = '{val}'")
-
+        
         # 4️⃣ List → IN (...)
             elif isinstance(val, list):
                 values = ", ".join(
@@ -188,7 +270,7 @@ class SQLGenerator:
                     for v in val
                 )
                 conditions.append(f"{col} IN ({values})")
-
+    
         if not conditions:
             return ""
 
@@ -267,25 +349,27 @@ class SQLGenerator:
         for m in metrics:
 
         # -----------------------------
-        # CASE 1: Dict-based metrics
+        # CASE 1: Dict-based metrics (RAG / LLM)
         # -----------------------------
             if isinstance(m, dict):
-                agg = m.get("aggregation")
-                name = m.get("name")
+                # Support both formats:
+                # {aggregation, name}  OR  {function, column}
+                agg = (m.get("aggregation") or m.get("function") or "").lower()
+                col = (m.get("name") or m.get("column") or "").lower()
 
-                if agg in ("average", "avg") and name == "amount_inr":
+                if agg in ("average", "avg") and col == "amount_inr":
                     normalized.append("avg_amount")
 
-                elif agg == "sum" and name == "amount_inr":
+                elif agg == "sum" and col == "amount_inr":
                     normalized.append("total_amount")
 
                 elif agg == "count":
                     normalized.append("count")
 
-                elif agg == "min" and name == "amount_inr":
+                elif agg == "min" and col == "amount_inr":
                     normalized.append("min_amount")
 
-                elif agg == "max" and name == "amount_inr":
+                elif agg == "max" and col == "amount_inr":
                     normalized.append("max_amount")
 
         # -----------------------------

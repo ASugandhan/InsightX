@@ -217,7 +217,7 @@ class QueryParser:
         """Calculate parse confidence"""
         confidence = 0.5
         
-        if intent != QueryIntent.unknown:
+        if intent != QueryIntent.UNKNOWN:
             confidence += 0.3
         if metrics:
             confidence += 0.1

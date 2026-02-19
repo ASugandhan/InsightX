@@ -41,12 +41,22 @@ class ResponseFormatter:
         
         print("✓ Response Formatter initialized (Full explainability)")
 
-    def _normalize_metrics(self, metrics):
-        return [
-            m if isinstance(m, str)
-            else m.get("alias", "")
-            for m in metrics
-        ]
+    def _normalize_metrics(self, metrics) -> List[str]:
+        """Normalize metrics to string List"""
+
+        normalized = []
+        for m in metrics:
+            if isinstance(m, str):
+                normalized.append(m)
+            elif isinstance(m, dict):
+                agg = m.get('aggregation', '')
+                col = m.get('column', '')
+                if agg and col:
+                    normalized.append(f"{agg}_{col.replace('_inr','')}")
+                else:
+                    normalized.append(str(m))
+        
+        return normalized
     
     def format(self,
                query: str,
@@ -56,7 +66,8 @@ class ResponseFormatter:
                filters: Dict = None,
                metrics: List[str] = None,
                execution_time_ms: float = 0,
-               baseline: pd.DataFrame = None) -> Response:
+               baseline: pd.DataFrame = None,
+               analytics_engine = None) -> Response:
         """
         Format complete response with all 3 tiers
         
@@ -76,14 +87,31 @@ class ResponseFormatter:
         metrics = self._normalize_metrics(metrics or [])
         filters = filters or {}
         
+        # ✅ STORE analytics engine for trust builder
+        self._analytics_engine = analytics_engine
+    
+        # ✅ GET trust builder
+        from explainability.trust_builder import TrustBuilder
+        trust = TrustBuilder()
+    
+        # ✅ GET actual sample size
+        actual_sample_size = None
+        if analytics_engine:
+            actual_sample_size = trust.get_actual_sample_size(analytics_engine, filters)
+    
+        if not actual_sample_size:
+            actual_sample_size = self._get_sample_size(result)
+
+        if not actual_sample_size:
+            actual_sample_size = 0 
+
         # TIER 1: Always visible
         tier1 = self._format_tier1(query, result, filters, baseline)
         
         # Confidence badge
         conf_badge = self._confidence_badge(confidence)
         
-        # Sample size
-        sample_size = self._get_sample_size(result)
+        quality_badge = trust.get_data_quality_badge(actual_sample_size, confidence)
         
         # TIER 2: Detailed explanation
         tier2 = self.tier2.explain(
@@ -112,6 +140,8 @@ class ResponseFormatter:
             total_rows=250000
         )
         caveats = self.caveat_detector.format_caveats(detected_caveats)
+        sanity_checks = trust.run_sanity_checks(result, filters, metrics, actual_sample_size)
+        sanity_text = "\n\n🔍 VALIDATION:\n" + "\n".join([f"  {c}" for c in sanity_checks])
         
         # Hypotheses (for "why" questions)
         hypothesis_list = self.hypothesis_gen.generate_hypotheses(
@@ -124,14 +154,15 @@ class ResponseFormatter:
         
         # Context comparison
         context = self._format_context_comparison(result, baseline, filters)
+        tier1_with_badge = tier1 + f"\n\n📊 {quality_badge}"
         
         return Response(
-            tier1_text=tier1,
+            tier1_text=tier1_with_badge, 
             confidence=conf_badge,
-            sample_size=sample_size,
+            sample_size=actual_sample_size,
             tier2_details=tier2,
             tier3_technical=tier3,
-            caveats=caveats,
+            caveats=caveats + sanity_text,
             hypotheses=hypotheses,
             context_comparison=context
         )
@@ -141,50 +172,81 @@ class ResponseFormatter:
                   result: pd.DataFrame,
                   filters: Dict,
                   baseline: pd.DataFrame = None) -> str:
-        """Format Tier 1 - Always visible answer"""
-
+        """Format Tier 1 - Always visible answer with trust indicators"""
+    
         lines = []
-
+    
+    # Get trust builder
+        from explainability.trust_builder import TrustBuilder
+        trust = TrustBuilder()
+    
+    # Get actual sample size
+        actual_sample_size = None
+        if hasattr(self, '_analytics_engine'):
+            actual_sample_size = trust.get_actual_sample_size(self._analytics_engine, filters)
+    
     # CASE 1: Single aggregated result
         if len(result) == 1:
             # Prefer amount / rate over count
-            priority = ["avg_amount", "total_amount", "success_rate",
-                        "failure_rate", "fraud_flag_rate", "count"]
-
+            priority = ["avg_amount", "total_amount", "median_amount",
+                        "success_rate", "failure_rate", "fraud_flag_rate", "count"]
+        
+            metric_found = None
+            value_found = None
+        
             for metric in priority:
                 if metric in result.columns:
-                    value = result[metric].iloc[0]
-
+                    metric_found = metric
+                    value_found = result[metric].iloc[0]
+                
+                # Main result display
                     if "amount" in metric:
-                        lines.append(
-                            f"💰 {self._humanize_column(metric)}: ₹{value:,.2f}"
-                        )
+                        lines.append(f"💰 {self._humanize_column(metric)}: ₹{value_found:,.2f}")
+                    
+                    # ✅ ADD: Confidence interval
+                        if actual_sample_size and actual_sample_size > 30:
+                            lower, upper = trust.calculate_confidence_interval(
+                                value_found, actual_sample_size
+                            )
+                            if lower and upper:
+                                lines.append(f"   95% Confidence: ₹{lower:,} - ₹{upper:,}")
+                    
+                    # ✅ ADD: Sample size context
+                        if actual_sample_size:
+                            lines.append(f"   (Based on {actual_sample_size:,} transactions)")
+                
                     elif "rate" in metric:
-                        lines.append(
-                            f"📊 {self._humanize_column(metric)}: {value:.2f}%"
-                        )
-                    else:
-                        lines.append(
-                            f"📈 {self._humanize_column(metric)}: {value:,.0f} transactions"
-                        )
+                        lines.append(f"📊 {self._humanize_column(metric)}: {value_found:.2f}%")
+                        if actual_sample_size:
+                            lines.append(f"   (Based on {actual_sample_size:,} transactions)")
+                
+                    else:  # count
+                        lines.append(f"📈 {self._humanize_column(metric)}: {value_found:,.0f} transactions")
+                
                     break
-
+        
+        # ✅ ADD: Reasonableness check
+            if metric_found and value_found:
+                reasonableness = trust.check_reasonableness(metric_found, value_found, filters)
+                if reasonableness:
+                    lines.append(f"\n{reasonableness}")
+    
     # CASE 2: Small grouped result
         elif len(result) <= 10:
             lines.append("📊 Results:\n")
             lines.append(result.to_string(index=False))
-
+    
     # CASE 3: Large result
         else:
             lines.append(f"📊 Found {len(result):,} records")
             lines.append("\nTop 10 results:")
             lines.append(result.head(10).to_string(index=False))
-
+    
     # Key insight
         insight = self._generate_key_insight(result, filters, baseline)
         if insight:
             lines.append(f"\n\n💡 Key Insight: {insight}")
-
+    
         return "\n".join(lines)
 
     def _format_context_comparison(self,
@@ -284,13 +346,22 @@ class ResponseFormatter:
             return "LOW ⚠️"
     
     def _get_sample_size(self, result: pd.DataFrame) -> int:
-    # Use COUNT only if it is the ONLY metric
-        if list(result.columns) == ["count"]:
-            return int(result["count"].iloc[0])
-        # Grouped queries → number of groups
-        return len(result)
+        """
+        Determine sample size safely.
+        Only trust COUNT when explicitly present.
+        """
 
-    
+        # Case 1: Explicit COUNT metric
+        if "count" in result.columns:
+            try:
+                return int(result["count"].iloc[0])
+            except Exception:
+                return 0
+
+        # Case 2: Aggregated metric without count
+        # Cannot infer true sample size from result alone
+        return None
+
     def _humanize_column(self, col: str) -> str:
         """Convert column name to human-readable"""
         mapping = {
