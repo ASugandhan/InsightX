@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback} from "react";
-import type { FC, ChangeEvent, KeyboardEvent, DragEvent } from "react";
+import type { FC, ChangeEvent, KeyboardEvent } from "react";
 import { motion } from "framer-motion";
 import Particles from "./Particles";
 
@@ -1530,32 +1530,85 @@ export default function InsightX() {
   };
 
   const sendMessage = async (text: string): Promise<void> => {
-    const hasAtt = attachedFiles.length > 0;
-    if ((!text.trim() && !hasAtt) || isTyping) return;
-    const attachmentMeta = attachedFiles.map((af: FileAttachment) => ({ name: af.file.name, type: af.type, preview: af.preview }));
-    const displayText = text.trim() || `[Attached ${attachedFiles.length} file${attachedFiles.length > 1 ? "s" : ""}]`;
-    const userMsg: Message = { id: Date.now() + "u", role: "user", text: displayText, timestamp: new Date(), attachments: attachmentMeta.length > 0 ? attachmentMeta : undefined };
-    setMessages(prev => [...prev, userMsg]);
-    setInput("");
-    setAttachedFiles([]);
-    if (textareaRef.current) textareaRef.current.style.height = "auto";
-    setIsTyping(true);
-    setActiveTab("Overview");
-    try {
-      await new Promise(r => setTimeout(r, 800 + Math.random() * 600));
-      const prefix = hasAtt ? `Received ${attachedFiles.length} file(s). Demo: ` : "";
-      const aiMsg: Message = { id: Date.now() + "a", role: "ai", text: prefix + DEMO_ANSWERS[demoIdx++ % DEMO_ANSWERS.length], timestamp: new Date(), confidence: "HIGH (0.91)", sampleSize: 248500, execMs: 42, chartData: makeDemoChart(text) };
-      setMessages(prev => [...prev, aiMsg]);
-      const entry: HistoryItem = { id: Date.now().toString(), title: (text.trim() || (attachmentMeta[0]?.name ?? "File")).slice(0, 38), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
-      setHistoryItems(prev => [entry, ...prev.slice(0, 14)]);
-      setActiveHist(entry.id);
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
-      setMessages(prev => [...prev, { id: Date.now() + "e", role: "ai", isError: true, timestamp: new Date(), text: `⚠ ${errorMsg}` }]);
-    } finally {
-      setIsTyping(false);
-    }
+  const hasAtt = attachedFiles.length > 0;
+  if ((!text.trim() && !hasAtt) || isTyping) return;
+  
+  const attachmentMeta = attachedFiles.map((af: FileAttachment) => ({ 
+    name: af.file.name, 
+    type: af.type, 
+    preview: af.preview 
+  }));
+  
+  const displayText = text.trim() || `[Attached ${attachedFiles.length} file${attachedFiles.length > 1 ? "s" : ""}]`;
+  
+  const userMsg: Message = { 
+    id: Date.now() + "u", 
+    role: "user", 
+    text: displayText, 
+    timestamp: new Date(), 
+    attachments: attachmentMeta.length > 0 ? attachmentMeta : undefined 
   };
+  
+  setMessages(prev => [...prev, userMsg]);
+  setInput("");
+  setAttachedFiles([]);
+  if (textareaRef.current) textareaRef.current.style.height = "auto";
+  setIsTyping(true);
+  setActiveTab("Overview");
+  
+  try {
+    const response = await fetch('http://localhost:8000/api/query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        question: text.trim(),
+        session_id: null,
+        show_tier2: false,
+        show_tier3: false
+      }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Server error: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    
+    const aiMsg: Message = {
+      id: data.id,
+      role: "ai",
+      text: data.text,
+      timestamp: new Date(data.timestamp),
+      confidence: data.confidence,
+      sampleSize: data.sampleSize,
+      execMs: data.execMs,
+      chartData: data.chartData || undefined
+    };
+    
+  setMessages(prev => [...prev, aiMsg]);
+    const entry: HistoryItem = { 
+      id: Date.now().toString(), 
+      title: (text.trim() || (attachmentMeta[0]?.name ?? "File")).slice(0, 38), 
+      time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) 
+    };
+    setHistoryItems(prev => [entry, ...prev.slice(0, 14)]);
+    setActiveHist(entry.id);
+    
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
+    setMessages(prev => [...prev, { 
+      id: Date.now() + "e", 
+      role: "ai", 
+      isError: true, 
+      timestamp: new Date(), 
+      text: `⚠ ${errorMsg}` 
+    }]);
+  } finally {
+    setIsTyping(false);
+  }
+};
 
   const handleNewChat = () => {
     setMessages([]); setActiveHist(null); setAttachedFiles([]); setActiveTab("Overview");
