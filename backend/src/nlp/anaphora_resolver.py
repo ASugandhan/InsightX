@@ -68,7 +68,25 @@ class AnaphoraResolver:
         
         # Check for standalone pronouns (not part of other words)
         pattern = r'\b(' + '|'.join(all_anaphora) + r')\b'
-        return bool(re.search(pattern, query_lower))
+        if not re.search(pattern, query_lower):
+            return False
+
+        # GUARD: Do NOT resolve if query contains arithmetic expression
+        # e.g. "what is that 5000 - 3000" - "that" is NOT a reference
+        if re.search(r'\d+\s*[\+\-\*\/]\s*\d+', query_lower):
+            return False
+
+        # GUARD: Do NOT resolve standalone question phrases
+        non_ref_patterns = [
+            r'what is (it|that|this)\??\s*$',
+            r'what does (it|that|this) mean',
+            r'(that|this) is\b',
+        ]
+        for pat in non_ref_patterns:
+            if re.search(pat, query_lower):
+                return False
+
+        return True
     
     def _get_recent_entities(self, state: ConversationState, window: int = 3) -> Dict:
         """

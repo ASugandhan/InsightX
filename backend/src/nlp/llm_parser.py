@@ -1,4 +1,4 @@
-"""
+﻿"""
 LLM-based Query Parser using Gemini API (NEW SDK)
 Falls back to rule-based parser if LLM fails
 CLEAN + FIXED VERSION
@@ -14,6 +14,14 @@ from nlp.parser import QueryIntent
 
 from google import genai
 from dotenv import load_dotenv
+
+
+from nlp.schema_validator import SchemaValidator
+from nlp.query_clarifier import QueryClarifier
+from nlp.temporal_parser import TemporalParser
+from nlp.context_defaults import ContextDefaults
+from rag.query_rewriter import QueryRewriter
+from explainability.confidence_calibrator import ConfidenceCalibrator
 try:
     from rag.query_enhancer import QueryEnhancer
     RAG_AVAILABLE = True
@@ -111,6 +119,20 @@ class QueryParser:
         if age_match:
             filters["sender_age_group"] = age_match.group(1)
 
+        # Amount filters: "above 5000", ">= 1000", "more than 500"
+        amount_gte = re.search(r"(?:above|over|more than|>=|greater than)\s*[\u20b9rs\.]*\s*(\d+)", q)
+        amount_lte = re.search(r"(?:below|under|less than|<=)\s*[\u20b9rs\.]*\s*(\d+)", q)
+        if amount_gte:
+            filters["amount_inr"] = {"gte": int(amount_gte.group(1))}
+        if amount_lte:
+            filters["amount_inr"] = {"lte": int(amount_lte.group(1))}
+
+        # Status filters
+        if "failed" in q and "transaction_status" not in filters:
+            filters["transaction_status"] = "FAILED"
+        if "success" in q and "successful" in q and "transaction_status" not in filters:
+            filters["transaction_status"] = "SUCCESS"
+
         return ParsedQuery(
             intent=intent,
             metrics=metrics,
@@ -134,12 +156,21 @@ class LLMParser:
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
             self.model = "models/gemini-flash-latest"
-            print("✓ LLM Parser initialized (Gemini Flash - NEW SDK)")
+            print("âœ“ LLM Parser initialized (Gemini Flash - NEW SDK)")
         else:
             self.client = None
-            print("⚠️ LLM unavailable — using rule-based parser only")
+            print("âš ï¸ LLM unavailable â€” using rule-based parser only")
 
         self.fallback_parser = QueryParser()
+        
+        # Enhanced components for accuracy improvement
+        self.query_clarifier = QueryClarifier()
+        self.temporal_parser = TemporalParser()
+        self.context_defaults = ContextDefaults()
+        self.query_rewriter = QueryRewriter()
+        self.confidence_calibrator = ConfidenceCalibrator()
+
+        # Load schema for LLM prompt building
         self.schema = self._load_schema()
 
         # -------------------------------------------------
@@ -151,48 +182,71 @@ class LLMParser:
                     persist_directory="../data/chroma_db",
                     analytics_engine=self.analytics_engine if hasattr(self, "analytics_engine") else None
                     )
-                print("✓ RAG enhancement enabled")
+                print("âœ“ RAG enhancement enabled")
             except Exception as e:
-                print(f"⚠️ RAG unavailable: {e}")
+                print(f"âš ï¸ RAG unavailable: {e}")
                 self.query_enhancer = None
         else:
             self.query_enhancer = None
 
     def parse(self, query: str, use_llm: bool = True) -> ParsedQuery:
-    # ---------- LLM path ----------
+        """Enhanced parsing with all improvements"""
+        
+        # Step 1: Query clarification (check if needs clarification)
+        # Note: Clarification handling should be done at API layer
+        # Here we just detect it
+        needs_clarification = self.query_clarifier.needs_clarification(query)
+        if needs_clarification:
+            # Could log or flag this, but continue with parsing
+            pass
+        
+        # Step 2: Query rewriting
+        rewritten_query = self.query_rewriter.rewrite(query)
+        
+        # Step 3: Temporal parsing
+        temporal_filters = self.temporal_parser.parse_temporal(query)
+        
+        # Step 4: LLM parsing
         if use_llm and self.client:
             try:
-                parsed = self._llm_parse(query)
-                parsed.confidence = max(parsed.confidence, 0.85)
-
-                # 🔍 RAG Enhancement (LLM output)
+                parsed = self._llm_parse(rewritten_query)
+                
+                # Add temporal filters
+                parsed.filters.update(temporal_filters)
+                
+                # Apply context defaults
+                parsed = self.context_defaults.apply_defaults(parsed, query)
+                
+                # RAG enhancement
                 if self.query_enhancer:
                     enhanced, explanation = self.query_enhancer.enhance_parsed_query(query, parsed)
-                    if explanation != "No enhancements applied":
-                        print(f"🔍 RAG: {explanation}")
+                    
+                    # Calibrate confidence
+                    complexity = self.confidence_calibrator.assess_query_complexity(enhanced)
+                    rag_boost = (enhanced.confidence - parsed.confidence)
+                    
+                    # Will assess result quality after execution
+                    enhanced.confidence, _ = self.confidence_calibrator.calibrate(
+                        parsed.confidence, complexity, rag_boost, 1.0  # Assume good quality for now
+                    )
+                    
                     return enhanced
-
+                
                 return parsed
-
+                
             except Exception as e:
-                print("⚠️ Gemini error:", e)
-                fallback = self.fallback_parser.parse(query)
-                fallback.confidence = 0.6
-
-                if self.query_enhancer:
-                    fallback, _ = self.query_enhancer.enhance_parsed_query(query, fallback)
-
-                return fallback
-
-        # ---------- No LLM path ----------
+                print(f"LLM error: {e}, falling back to rule-based parser")
+                # Fall back to rule-based
+        
+        # Fallback parsing
         fallback = self.fallback_parser.parse(query)
-        fallback.confidence = 0.6
-
+        fallback.filters.update(temporal_filters)
+        fallback = self.context_defaults.apply_defaults(fallback, query)
+        
         if self.query_enhancer:
             fallback, _ = self.query_enhancer.enhance_parsed_query(query, fallback)
-
+        
         return fallback
-
     def _llm_parse(self, query: str) -> ParsedQuery:
         """Parse using Gemini LLM with retry logic"""
     
@@ -207,7 +261,13 @@ class LLMParser:
             try:
                 response = self.client.models.generate_content(
                     model=self.model,
-                    contents=prompt
+                    contents=prompt,
+                    config={
+                        "temperature": 0.1,  # Low temperature = less hallucination
+                        "top_p": 0.8,
+                        "top_k": 20,
+                        "max_output_tokens": 1000
+                    }
                 )
             
             # Success! Process response
@@ -215,7 +275,7 @@ class LLMParser:
                 text = text.replace("```json", "").replace("```", "").strip()
                 result = json.loads(text)
             
-            # ✅ NORMALIZE METRICS FORMAT
+            # âœ… NORMALIZE METRICS FORMAT
                 metrics = result.get("metrics", [])
                 normalized_metrics = []
 
@@ -272,7 +332,7 @@ class LLMParser:
                 if '503' in error_str or 'UNAVAILABLE' in error_str or 'high demand' in error_str.lower():
                     if attempt < max_retries - 1:
                         wait_time = (attempt + 1) * 3  # 3s, 6s, 9s
-                        print(f"⏳ Gemini rate limited, retrying in {wait_time}s... (attempt {attempt + 2}/{max_retries})")
+                        print(f"â³ Gemini rate limited, retrying in {wait_time}s... (attempt {attempt + 2}/{max_retries})")
                         time.sleep(wait_time)
                         continue
             
@@ -351,3 +411,5 @@ if __name__ == "__main__":
         print("Dimensions:", pq.dimensions)
         print("Filters:", pq.filters)
         print("Confidence:", pq.confidence)
+
+

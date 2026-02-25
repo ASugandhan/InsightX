@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 sys.path.append('src')
 
 from typing import List
@@ -7,6 +7,10 @@ from analytics.engine import AnalyticsEngine
 from analytics.sql_generator import SQLGenerator
 from nlp.conversation_manager import ConversationManager
 from explainability.formatter import ResponseFormatter
+
+from validation.result_validator import ResultValidator
+from explainability.formatter import ResponseFormatter
+from explainability.confidence_calibrator import ConfidenceCalibrator
 import time
 
 
@@ -23,9 +27,13 @@ class InsightXSystem:
         
         # Track current session
         self.current_session = None
-        self._last_caveats = "" 
+        self._last_caveats = ""
+        
+        # Validation and confidence components
+        self.result_validator = ResultValidator()
+        self.confidence_calibrator = ConfidenceCalibrator() 
 
-        print("\n✓ All components initialized!")
+        print("\nâœ“ All components initialized!")
         print("="*60)
     
     def ask(self, question: str, show_tier2: bool = False, show_tier3: bool = False):
@@ -38,7 +46,7 @@ class InsightXSystem:
             show_tier3: Show technical details
         """
         
-        print(f"\n📝 Question: {question}")
+        print(f"\nðŸ“ Question: {question}")
         
         # Process with conversation context
         enhanced, self.current_session = self.conversation_manager.process_query(
@@ -49,19 +57,38 @@ class InsightXSystem:
         # Show context
         context = self.conversation_manager.get_context_summary(self.current_session)
         if context != "No active context":
-            print(f"🔗 Context: {context}")
+            print(f"ðŸ”— Context: {context}")
         
-        print(f"✓ Parsed (confidence: {enhanced.confidence:.2f})")
+        print(f"âœ“ Parsed (confidence: {enhanced.confidence:.2f})")
         
         # Generate SQL
         sql = self.sql_generator.generate(enhanced)
-        print(f"✓ Generated SQL")
+        print(f"âœ“ Generated SQL")
         
         # Execute query with timing
         start_time = time.time()
         result = self.analytics.query(sql)
         execution_time_ms = (time.time() - start_time) * 1000
-        print(f"✓ Query executed ({len(result)} rows, {execution_time_ms:.1f}ms)")
+        print(f"âœ“ Query executed ({len(result)} rows, {execution_time_ms:.1f}ms)")
+        
+        # ✅ VALIDATION: Validate result quality
+        validation = self.result_validator.validate(result, enhanced.metrics, enhanced.filters)
+        
+        # ✅ VALIDATION: Adjust confidence based on validation
+        if not validation['is_valid']:
+            enhanced.confidence = max(0.5, enhanced.confidence + validation['confidence_adjustment'])
+        
+        # ✅ VALIDATION: Get actual sample size for confidence calibration
+        sample_size = len(result) if not result.empty else 0
+        result_quality = self.confidence_calibrator.assess_result_quality(result, sample_size)
+        
+        # ✅ VALIDATION: Final confidence calibration
+        complexity = self.confidence_calibrator.assess_query_complexity(enhanced)
+        rag_boost = 0.0  # Already applied in parser
+        enhanced.confidence, confidence_label = self.confidence_calibrator.calibrate(
+            enhanced.confidence, complexity, rag_boost, result_quality
+        )
+
         
         # Get baseline for comparison
         baseline = self._get_baseline(enhanced.metrics)
@@ -79,7 +106,7 @@ class InsightXSystem:
             analytics_engine=self.analytics
         )
         
-        print(f"✓ Response formatted")
+        print(f"âœ“ Response formatted")
         
         # Display Tier 1 (always)
         print(f"\n{'='*60}")
@@ -116,7 +143,7 @@ class InsightXSystem:
             print(f"{'='*60}")
             print(response.tier2_details)
         else:
-            print(f"\n💡 Tip: Add show_tier2=True to see detailed explanation")
+            print(f"\nðŸ’¡ Tip: Add show_tier2=True to see detailed explanation")
         
         # Show Tier 3 if requested
         if show_tier3:
@@ -125,7 +152,7 @@ class InsightXSystem:
             print(f"{'='*60}")
             print(response.tier3_technical)
         else:
-            print(f"💡 Tip: Add show_tier3=True to see SQL and technical details")
+            print(f"ðŸ’¡ Tip: Add show_tier3=True to see SQL and technical details")
         
         return response
     
@@ -161,7 +188,7 @@ class InsightXSystem:
         """Start a fresh conversation"""
         if self.current_session:
             self.conversation_manager.clear_context(self.current_session)
-            print("✓ Context cleared - starting fresh!")
+            print("âœ“ Context cleared - starting fresh!")
 
 
 # ============================================================================
@@ -175,22 +202,22 @@ if __name__ == "__main__":
     print("="*60)
     
     # Demo 1: Basic query with all tiers
-    print("\n📌 DEMO 1: Basic Query")
+    print("\nðŸ“Œ DEMO 1: Basic Query")
     print("-" * 60)
     system.ask("What is the average P2M transaction amount?", show_tier2=True, show_tier3=True)
     
     # Demo 2: Why question with hypotheses
-    print("\n\n📌 DEMO 2: 'Why' Question")
+    print("\n\nðŸ“Œ DEMO 2: 'Why' Question")
     print("-" * 60)
     system.ask("Why is the P2M amount higher?")
     
     # Demo 3: Multi-turn with context
-    print("\n\n📌 DEMO 3: Multi-turn Conversation")
+    print("\n\nðŸ“Œ DEMO 3: Multi-turn Conversation")
     print("-" * 60)
     system.ask("Show me P2P transactions")
     system.ask("What about weekends?")
     system.ask("Why might weekend transactions differ?")
     
     print("\n" + "="*60)
-    print("✓ DAY 4 DEMO COMPLETE!")
+    print("âœ“ DAY 4 DEMO COMPLETE!")
     print("="*60)

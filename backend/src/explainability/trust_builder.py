@@ -25,8 +25,6 @@ class TrustBuilder:
             'failure_rate': (1, 15),
             'fraud_flag_rate': (0, 20)
         }
-        
-        print("✓ Trust Builder initialized")
     
     def get_data_quality_badge(self, sample_size: int, confidence: float) -> str:
         """Get visual data quality indicator"""
@@ -170,21 +168,17 @@ class TrustBuilder:
                 confidence=1.0
             )
         
-            sql = gen.generate(count_query)
-            print(f"🔍 DEBUG: Counting with SQL: {sql[:100]}...")  # Debug
+            sql = gen.generate(count_query)  # Debug
         
             result = analytics_engine.query(sql)
         
             if not result.empty and 'count' in result.columns:
-                count = int(result['count'].iloc[0])
-                print(f"✓ Sample size: {count:,}")  # Debug
+                count = int(result['count'].iloc[0])  # Debug
                 return count
-            else:
-                print(f"⚠️ No count column in result: {result.columns.tolist()}")  # Debug
+            else:  # Debug
                 return None
 
-        except Exception as e:
-            print(f"⚠️ Sample size calculation error: {e}")  # Debug - THIS WAS SILENT!
+        except Exception as e:  # Debug - THIS WAS SILENT!
             import traceback
             traceback.print_exc()  # Show full error
             return None
@@ -242,5 +236,4 @@ if __name__ == "__main__":
         print(f"  {result if result else 'No specific check'}")
     
     print("\n" + "="*80)
-    print("✓ TRUST BUILDER TEST COMPLETE")
     print("="*80)

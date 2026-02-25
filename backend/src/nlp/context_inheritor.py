@@ -44,37 +44,49 @@ class ContextInheritor:
     
     def _is_followup_question(self, parsed: ParsedQuery, state: ConversationState) -> bool:
         """
-        Detect if this is a follow-up question
+        Detect if this is a follow-up question.
         
-        Indicators of follow-up:
-        - Short query (<5 words)
-        - Contains anaphora ("it", "that", "them", "those")
-        - Starts with "what about", "how about", "and", "also"
-        - Has very few filters (adding to existing context)
+        CRITICAL RULE: If the query already has explicit filters for key
+        dimensions (transaction_type, status, device, etc.), it is a
+        STANDALONE query - do NOT inherit old context into it.
         """
         
         query_lower = parsed.original_query.lower()
         word_count = len(parsed.original_query.split())
         
-        # Explicit follow-up phrases
+        # RULE 1: If query has its own explicit entity filters -> standalone
+        # e.g. "Show me P2P transactions" has transaction_type=P2P -> standalone
+        standalone_filter_keys = {
+            'transaction_type', 'merchant_category', 'device_type',
+            'sender_age_group', 'sender_state', 'sender_bank', 'receiver_bank'
+        }
+        if any(k in parsed.filters for k in standalone_filter_keys):
+            return False
+        
+        # RULE 2: If query has status + amount filter -> standalone
+        if 'transaction_status' in parsed.filters and 'amount_inr' in parsed.filters:
+            return False
+        
+        # RULE 3: Explicit follow-up phrases
         followup_phrases = [
             'what about', 'how about', 'what if', 'also show',
             'and the', 'also', 'too', 'as well'
         ]
-        
         if any(phrase in query_lower for phrase in followup_phrases):
             return True
         
-        # Anaphora indicators
+        # RULE 4: Anaphora words (standalone, not part of other words)
+        import re
         anaphora = ['it', 'that', 'them', 'those', 'these', 'this']
-        if any(word in query_lower.split() for word in anaphora):
+        anaphora_pattern = r'\b(' + '|'.join(anaphora) + r')\b'
+        if re.search(anaphora_pattern, query_lower):
             return True
         
-        # Short queries with minimal context are likely follow-ups
-        if word_count <= 5 and not parsed.filters:
+        # RULE 5: Short query with no filters - likely refining previous
+        if word_count <= 4 and not parsed.filters:
             return True
         
-        # Query only adds dimensions (grouping existing data)
+        # RULE 6: Query only adds a dimension with no new filters
         if parsed.dimensions and not parsed.filters and state.active_filters:
             return True
         

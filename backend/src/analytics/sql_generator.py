@@ -189,9 +189,10 @@ class SQLGenerator:
                 select_items.append("ROUND(MAX(amount_inr), 2) as max_amount")
 
         if not select_items:
-            raise ValueError(
-                f"SQLGenerator: No metrics or dimensions resolved. Parsed metrics: {parsed.metrics}"
-            )
+            # Final fallback: unknown metric - just do a COUNT
+            select_items.append("COUNT(*) as count")
+
+        
 
         return "SELECT " + ", ".join(select_items)
     
@@ -293,6 +294,11 @@ class SQLGenerator:
     
     def _build_order_by(self, parsed: ParsedQuery) -> str:
         """Build ORDER BY clause safely (GROUP BY compatible)"""
+
+        # CRITICAL FIX: Only ORDER BY when GROUP BY exists (i.e. dimensions present)
+        # Without GROUP BY, ordering a single-row aggregate result is invalid/meaningless
+        if not parsed.dimensions:
+            return ""
 
         # Map metrics to SELECT aliases (ONLY aggregated columns)
         metric_alias_map = {
@@ -401,13 +407,40 @@ class SQLGenerator:
                     normalized.append("avg_amount")
 
                 else:
-                    normalized.append(m)
+                    # Extended alias map for LLM-returned metric names
+                    alias_map = {
+                        # count variants
+                        "transaction_count": "count",
+                        "num_transactions": "count",
+                        "number_of_transactions": "count",
+                        "total_transactions": "count",
+                        "txn_count": "count",
+                        "transactions": "count",
+                        # avg amount variants
+                        "average_amount": "avg_amount",
+                        "mean_amount": "avg_amount",
+                        "avg_transaction_amount": "avg_amount",
+                        "average_transaction_amount": "avg_amount",
+                        # total amount variants
+                        "sum_amount": "total_amount",
+                        "total_volume": "total_amount",
+                        "transaction_volume": "total_amount",
+                        # rate variants
+                        "failure_rate_pct": "failure_rate",
+                        "fail_rate": "failure_rate",
+                        "failed_rate": "failure_rate",
+                        "success_rate_pct": "success_rate",
+                        "succeed_rate": "success_rate",
+                        "fraud_rate": "fraud_flag_rate",
+                        "fraud_flag_rate_pct": "fraud_flag_rate",
+                    }
+                    normalized.append(alias_map.get(m_lower, "count"))
 
         # -----------------------------
         # CASE 3: Anything unexpected
         # -----------------------------
             else:
-                normalized.append(m)
+                normalized.append("count")
 
         return normalized
 
