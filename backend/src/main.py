@@ -1,223 +1,200 @@
-﻿import sys
+﻿"""
+InsightX System - Full Dynamic Pipeline
+Flow: Question -> RAG (domain context) -> Gemini NLU (SQL) -> DuckDB (full 250k) -> Intelligence Layer -> Gemini Formatter -> Answer
+"""
+
+import sys
+import time
+import pandas as pd
+
 sys.path.append('src')
 
-from typing import List
-import pandas as pd
 from analytics.engine import AnalyticsEngine
-from analytics.sql_generator import SQLGenerator
-from nlp.conversation_manager import ConversationManager
-from explainability.formatter import ResponseFormatter
-
-from validation.result_validator import ResultValidator
-from explainability.formatter import ResponseFormatter
-from explainability.confidence_calibrator import ConfidenceCalibrator
-import time
+from analytics.intelligence_layer import IntelligenceLayer
+from nlp.gemini_nlu import GeminiNLU
+from explainability.gemini_formatter import GeminiResponseFormatter
+from rag.financial_knowledge_rag import FinancialKnowledgeRAG
 
 
 class InsightXSystem:
-    def __init__(self, csv_path):
+    def __init__(self, csv_path: str):
         print("\n" + "="*60)
-        print("INITIALIZING INSIGHTX SYSTEM")
+        print("  INSIGHTX - INTELLIGENT UPI ANALYTICS v2.0")
         print("="*60)
-        
+
+        # Core engine - loads ALL 250,000 rows into DuckDB
         self.analytics = AnalyticsEngine(csv_path)
-        self.sql_generator = SQLGenerator()
-        self.conversation_manager = ConversationManager()
-        self.formatter = ResponseFormatter()
-        
-        # Track current session
-        self.current_session = None
-        self._last_caveats = ""
-        
-        # Validation and confidence components
-        self.result_validator = ResultValidator()
-        self.confidence_calibrator = ConfidenceCalibrator() 
 
-        print("\nâœ“ All components initialized!")
-        print("="*60)
-    
-    def ask(self, question: str, show_tier2: bool = False, show_tier3: bool = False):
-        """
-        Main entry point with full explainability
-        
-        Args:
-            question: User's question
-            show_tier2: Show detailed explanation
-            show_tier3: Show technical details
-        """
-        
-        print(f"\nðŸ“ Question: {question}")
-        
-        # Process with conversation context
-        enhanced, self.current_session = self.conversation_manager.process_query(
-            question,
-            self.current_session
-        )
-        
-        # Show context
-        context = self.conversation_manager.get_context_summary(self.current_session)
-        if context != "No active context":
-            print(f"ðŸ”— Context: {context}")
-        
-        print(f"âœ“ Parsed (confidence: {enhanced.confidence:.2f})")
-        
-        # Generate SQL
-        sql = self.sql_generator.generate(enhanced)
-        print(f"âœ“ Generated SQL")
-        
-        # Execute query with timing
-        start_time = time.time()
-        result = self.analytics.query(sql)
-        execution_time_ms = (time.time() - start_time) * 1000
-        print(f"âœ“ Query executed ({len(result)} rows, {execution_time_ms:.1f}ms)")
-        
-        # ✅ VALIDATION: Validate result quality
-        validation = self.result_validator.validate(result, enhanced.metrics, enhanced.filters)
-        
-        # ✅ VALIDATION: Adjust confidence based on validation
-        if not validation['is_valid']:
-            enhanced.confidence = max(0.5, enhanced.confidence + validation['confidence_adjustment'])
-        
-        # ✅ VALIDATION: Get actual sample size for confidence calibration
-        sample_size = len(result) if not result.empty else 0
-        result_quality = self.confidence_calibrator.assess_result_quality(result, sample_size)
-        
-        # ✅ VALIDATION: Final confidence calibration
-        complexity = self.confidence_calibrator.assess_query_complexity(enhanced)
-        rag_boost = 0.0  # Already applied in parser
-        enhanced.confidence, confidence_label = self.confidence_calibrator.calibrate(
-            enhanced.confidence, complexity, rag_boost, result_quality
-        )
+        # Financial Knowledge RAG - answers WHY using domain expertise
+        rag_dir = csv_path.replace('upi_transactions_2024.csv', 'financial_rag_db')
+        self.rag = FinancialKnowledgeRAG(persist_directory=rag_dir)
 
-        
-        # Get baseline for comparison
-        baseline = self._get_baseline(enhanced.metrics)
-        
-        # Format response with full explainability
-        response = self.formatter.format(
-            query=question,
-            result=result,
-            confidence=enhanced.confidence,
-            sql=sql,
-            filters=enhanced.filters,
-            metrics=enhanced.metrics,
-            execution_time_ms=execution_time_ms,
-            baseline=baseline,
-            analytics_engine=self.analytics
-        )
-        
-        print(f"âœ“ Response formatted")
-        
-        # Display Tier 1 (always)
+        # Gemini NLU - understands questions, writes SQL dynamically
+        self.nlu = GeminiNLU()
+
+        # Intelligence Layer - YOUR original analytics: anomalies, benchmarks, trends
+        self.intelligence = IntelligenceLayer(self.analytics.precomputed)
+
+        # Gemini Formatter - converts data + insights into natural language
+        self.formatter = GeminiResponseFormatter()
+
+        # Conversation memory - full history passed to Gemini for context
+        self.conversation_history = []
+
+        print("\n✓ InsightX ready! Ask me anything about your UPI data.")
+        print("="*60 + "\n")
+
+    def ask(self, question: str) -> dict:
+        """
+        Main entry point. Ask anything in natural language.
+        Full pipeline: RAG -> Gemini NLU -> DuckDB (250k) -> Intelligence -> Gemini Format
+
+        Returns dict with answer, sql, insights, anomalies, chart data etc.
+        """
+
         print(f"\n{'='*60}")
-        print(f"ANSWER")
-        print(f"{'='*60}")
-        print(response.tier1_text)
-        print(f"\nConfidence: {response.confidence}")
-        print(f"Sample Size: {response.sample_size:,} records")
-        
-        # Display context comparison
-        if response.context_comparison and "No baseline" not in response.context_comparison:
-            print(f"\n{response.context_comparison}")
-        
-        # Display caveats
-        if (
-            response.caveats
-            and "No significant" not in response.caveats
-            and response.caveats != self._last_caveats
-        ):
-            print(f"\n{response.caveats}")
-            self._last_caveats = response.caveats
-        
-        # Display hypotheses if relevant
-        if "why" in question.lower() and response.hypotheses and "No specific" not in response.hypotheses:
-            print(f"\n{response.hypotheses}")
-            return response
-        
-        print(f"{'='*60}")
-        
-        # Show Tier 2 if requested
-        if show_tier2:
-            print(f"\n{'='*60}")
-            print(f"DETAILED EXPLANATION (Tier 2)")
-            print(f"{'='*60}")
-            print(response.tier2_details)
-        else:
-            print(f"\nðŸ’¡ Tip: Add show_tier2=True to see detailed explanation")
-        
-        # Show Tier 3 if requested
-        if show_tier3:
-            print(f"\n{'='*60}")
-            print(f"TECHNICAL DETAILS (Tier 3)")
-            print(f"{'='*60}")
-            print(response.tier3_technical)
-        else:
-            print(f"ðŸ’¡ Tip: Add show_tier3=True to see SQL and technical details")
-        
-        return response
-    
-    def _get_baseline(self, metrics: List[str]) -> pd.DataFrame:
-        """Get baseline data for comparison"""
-        
-        if not metrics:
-            return None
-        
-        # Use precomputed overall stats as baseline
-        overall = self.analytics.get_precomputed('overall')
-        
-        if overall:
-            import pandas as pd
-            baseline_data = {}
-            
-            for metric in metrics:
-                if metric == 'avg_amount':
-                    baseline_data['avg_amount'] = overall['avg_amount']
-                elif metric == 'success_rate':
-                    baseline_data['success_rate'] = overall['success_rate']
-                elif metric == 'failure_rate':
-                    baseline_data['failure_rate'] = overall['failure_rate']
-                elif metric == 'fraud_flag_rate':
-                    baseline_data['fraud_flag_rate'] = overall['fraud_flag_rate']
-            
-            if baseline_data:
-                return pd.DataFrame([baseline_data])
-        
-        return None
-    
+        print(f"Q: {question}")
+        start_total = time.time()
+
+        # ----------------------------------------------------------------
+        # STEP 1: RAG - Retrieve financial domain knowledge (the WHY layer)
+        # ----------------------------------------------------------------
+        rag_context = ""
+        if self.rag.should_use_rag(question):
+            print("→ Retrieving financial domain knowledge...")
+            rag_context = self.rag.retrieve(question, n_results=3)
+            if rag_context:
+                print(f"  ✓ Found relevant domain knowledge")
+
+        # ----------------------------------------------------------------
+        # STEP 2: Gemini NLU - Understand question, write SQL
+        # ----------------------------------------------------------------
+        print("→ Understanding question & generating SQL...")
+        nlu_result = self.nlu.understand(
+            question=question,
+            conversation_history=self.conversation_history,
+            rag_context=rag_context
+        )
+
+        sql = nlu_result.get("sql", "")
+        intent = nlu_result.get("intent", question)
+        entities = nlu_result.get("entities", [])
+        is_followup = nlu_result.get("is_followup", False)
+
+        print(f"  Intent: {intent}")
+        print(f"  SQL: {sql[:120]}{'...' if len(sql) > 120 else ''}")
+
+        # ----------------------------------------------------------------
+        # STEP 3: DuckDB - Execute SQL on FULL 250,000 rows
+        # ----------------------------------------------------------------
+        print("→ Querying full 250,000 row dataset...")
+        start_query = time.time()
+        result = self._execute_sql_safely(question, sql)
+        exec_ms = (time.time() - start_query) * 1000
+        print(f"  ✓ {len(result)} result rows in {exec_ms:.1f}ms")
+
+        # ----------------------------------------------------------------
+        # STEP 4: Intelligence Layer - Analyze, detect anomalies, benchmark
+        # ----------------------------------------------------------------
+        print("→ Running intelligence analysis...")
+        intelligence = self.intelligence.analyze(result, intent, sql)
+        if intelligence.get("anomalies"):
+            print(f"  ⚠ {len(intelligence['anomalies'])} anomalies detected")
+        if intelligence.get("benchmark_comparison"):
+            print(f"  ✓ Benchmark comparison ready")
+
+        # ----------------------------------------------------------------
+        # STEP 5: Gemini Formatter - Natural language answer with insights
+        # ----------------------------------------------------------------
+        print("→ Generating natural language answer...")
+        answer = self.formatter.format(
+            question=question,
+            result=result,
+            intent=intent,
+            intelligence=intelligence,
+            rag_context=rag_context
+        )
+
+        total_ms = (time.time() - start_total) * 1000
+        print(f"  ✓ Done in {total_ms:.0f}ms total\n")
+        print(f"Answer: {answer}")
+        print("="*60)
+
+        # ----------------------------------------------------------------
+        # STEP 6: Update conversation history for follow-up context
+        # ----------------------------------------------------------------
+        self.conversation_history.append({"role": "user", "content": question})
+        self.conversation_history.append({"role": "assistant", "content": answer})
+        # Keep last 20 messages (10 exchanges)
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
+
+        return {
+            "answer": answer,
+            "sql": sql,
+            "result": result,
+            "execution_ms": exec_ms,
+            "total_ms": total_ms,
+            "insights": intelligence.get("insights", []),
+            "anomalies": intelligence.get("anomalies", []),
+            "proactive_tips": intelligence.get("proactive_tips", []),
+            "benchmark_comparison": intelligence.get("benchmark_comparison", ""),
+            "rag_context_used": bool(rag_context),
+            "row_count": len(result),
+            "intent": intent,
+            "entities": entities,
+            "is_followup": is_followup
+        }
+
+    def _execute_sql_safely(self, question: str, sql: str) -> pd.DataFrame:
+        """Execute SQL, auto-fix with Gemini if it fails."""
+        try:
+            return self.analytics.query(sql)
+        except Exception as e:
+            print(f"  ⚠ SQL error: {e}. Asking Gemini to fix...")
+            try:
+                fixed = self.nlu.fix_sql(question, sql, str(e))
+                return self.analytics.query(fixed)
+            except Exception as e2:
+                print(f"  ✗ Fix also failed: {e2}")
+                return pd.DataFrame()
+
     def start_fresh(self):
-        """Start a fresh conversation"""
-        if self.current_session:
-            self.conversation_manager.clear_context(self.current_session)
-            print("âœ“ Context cleared - starting fresh!")
+        """Clear conversation history for a new chat."""
+        self.conversation_history = []
+        print("✓ Started fresh conversation")
+
+    def get_overview(self) -> dict:
+        """Get dataset overview stats."""
+        overall = self.analytics.precomputed.get('overall', {})
+        by_type = self.analytics.precomputed.get('by_type', [])
+        by_device = self.analytics.precomputed.get('by_device', [])
+        return {
+            "overall": overall,
+            "by_type": by_type,
+            "by_device": by_device,
+            "summary": (
+                f"250,000 UPI transactions | "
+                f"₹{overall.get('avg_amount', 0):,.0f} avg amount | "
+                f"{overall.get('success_rate', 0):.1f}% success rate | "
+                f"{overall.get('failure_rate', 0):.1f}% failure rate | "
+                f"{overall.get('fraud_flag_rate', 0):.2f}% fraud rate"
+            )
+        }
 
 
-# ============================================================================
-# DEMO
-# ============================================================================
 if __name__ == "__main__":
     system = InsightXSystem('../data/upi_transactions_2024.csv')
-    
-    print("\n\n" + "="*60)
-    print("DAY 4 DEMO: FULL EXPLAINABILITY")
-    print("="*60)
-    
-    # Demo 1: Basic query with all tiers
-    print("\nðŸ“Œ DEMO 1: Basic Query")
-    print("-" * 60)
-    system.ask("What is the average P2M transaction amount?", show_tier2=True, show_tier3=True)
-    
-    # Demo 2: Why question with hypotheses
-    print("\n\nðŸ“Œ DEMO 2: 'Why' Question")
-    print("-" * 60)
-    system.ask("Why is the P2M amount higher?")
-    
-    # Demo 3: Multi-turn with context
-    print("\n\nðŸ“Œ DEMO 3: Multi-turn Conversation")
-    print("-" * 60)
-    system.ask("Show me P2P transactions")
-    system.ask("What about weekends?")
-    system.ask("Why might weekend transactions differ?")
-    
-    print("\n" + "="*60)
-    print("âœ“ DAY 4 DEMO COMPLETE!")
-    print("="*60)
+    overview = system.get_overview()
+    print("\nDataset:", overview["summary"])
+
+    questions = [
+        "How many total transactions are there?",
+        "What is the failure rate for P2P transactions above 5000 rupees?",
+        "Which device type has the highest failure rate?",
+        "Why might weekends have more failures?",
+        "Show fraud trends by age group",
+        "What about by state?",
+    ]
+    for q in questions:
+        system.ask(q)
