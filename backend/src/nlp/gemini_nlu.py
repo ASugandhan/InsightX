@@ -54,7 +54,7 @@ class GeminiNLU:
     def __init__(self):
         api_key = os.getenv("GOOGLE_API_KEY")
         self.client = genai.Client(api_key=api_key)
-        self.model = "gemini-flash-latest"
+        self.model = "gemini-flash-lite-latest"
         print("GeminiNLU initialized")
 
     def understand(self, question: str, conversation_history: list, rag_context: str = "") -> dict:

@@ -22,7 +22,7 @@ class GeminiResponseFormatter:
     def __init__(self):
         api_key = os.getenv("GOOGLE_API_KEY")
         self.client = genai.Client(api_key=api_key)
-        self.model = "gemini-flash-latest"
+        self.model = "gemini-flash-lite-latest"
         print("GeminiResponseFormatter initialized")
 
     def format(self, question: str, result: pd.DataFrame, intent: str,
