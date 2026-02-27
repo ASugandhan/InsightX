@@ -105,10 +105,13 @@ body{background:var(--bg);color:var(--text);margin:0;}
   padding:10px 0;gap:6px;height:auto;min-height:var(--topbar-h);
 }
 .logo-mark{
-  width:36px;height:36px;border-radius:10px;flex-shrink:0;
+  width:40px;height:40px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
-  overflow:hidden;position:relative;
+  position:relative;
 }
+.logo-mark .nexus-card { border-radius: 10px; }
+.sidebar.collapsed .logo-mark { margin-bottom: 4px; }
+
 .logo-text{flex:1;min-width:0;overflow:hidden;transition:opacity .2s,max-width .28s;}
 .logo-name{font-family:'Syne',sans-serif;font-size:14px;font-weight:800;letter-spacing:-.025em;white-space:nowrap;line-height:1.1;}
 .logo-name em{color:var(--accent);font-style:normal;}
@@ -375,7 +378,7 @@ body{background:var(--bg);color:var(--text);margin:0;}
 @keyframes msgIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
 .msg-row.user{flex-direction:row-reverse;}
 .avatar{width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-family:'Syne',sans-serif;font-size:10px;font-weight:700;}
-.avatar.ai{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#000;box-shadow:0 0 12px var(--glow);}
+.avatar.ai{background:transparent;box-shadow:none;}
 .avatar.user{background:rgba(17,28,46,0.4);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);color:var(--text2);}
 [data-theme="light"] .avatar.user{background:rgba(240,245,255,0.3);border-color:rgba(0,0,0,0.08);}
 .bubble{max-width:72%;padding:14px 18px;border-radius:13px;font-size:15px;line-height:1.8;border:1px solid transparent;position:relative;}
@@ -395,17 +398,110 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .bubble-action-btn:hover{border-color:var(--accent);color:var(--accent);}
 
 /* ── RESPONSE CHART ── */
-.response-chart{margin-top:12px;background:rgba(17,28,46,0.4);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,0.1);border-radius:9px;padding:13px;}
+.response-chart{
+  margin-top: 16px;
+  background: rgba(10, 22, 40, 0.4);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: transform 0.2s, border-color 0.2s;
+}
+.response-chart:hover {
+  border-color: rgba(59, 130, 246, 0.45);
+  transform: translateY(-2px);
+}
 [data-theme="light"] .response-chart{background:rgba(240,245,255,0.4);border-color:rgba(0,0,0,0.06);}
-.chart-title{font-family:'DM Mono',monospace;font-size:9.5px;color:var(--accent);letter-spacing:.07em;text-transform:uppercase;margin-bottom:11px;}
-.chart-bars{display:flex;flex-direction:column;gap:6px;}
-.chart-row{display:flex;align-items:center;gap:9px;}
-.chart-label{font-family:'DM Mono',monospace;font-size:10px;color:var(--text2);width:85px;flex-shrink:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.chart-track{flex:1;height:22px;background:rgba(255,255,255,0.05);border-radius:4px;overflow:hidden;position:relative;}
+.chart-title{
+  font-family: 'Syne', sans-serif;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent2);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chart-title::before {
+  content: '';
+  width: 4px;
+  height: 4px;
+  background: var(--accent2);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent2);
+}
+.chart-bars{display:flex;flex-direction:column;gap:10px;}
+.chart-row{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  padding: 4px;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+.chart-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.chart-label{
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text2);
+  width: 90px;
+  flex-shrink: 0;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chart-track{
+  flex: 1;
+  height: 24px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
 [data-theme="light"] .chart-track{background:rgba(0,0,0,0.05);}
-.chart-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0;transition:width 1s var(--ease-out);display:flex;align-items:center;justify-content:flex-end;min-width:2px;}
-.chart-fill.amber{background:linear-gradient(90deg,var(--amber),#f97316);}.chart-fill.danger{background:linear-gradient(90deg,var(--danger),#ff8a65);}
-.chart-val{font-family:'DM Mono',monospace;font-size:9px;color:rgba(0,0,0,.8);padding-right:6px;white-space:nowrap;}
+.chart-fill{
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #3B82F6 0%, #1DD1EE 100%);
+  width: 0;
+  transition: width 1s cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 2px;
+  position: relative;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.3);
+}
+.chart-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+  transform: translateX(-100%);
+  animation: chartShimmer 3s infinite;
+}
+@keyframes chartShimmer {
+  100% { transform: translateX(100%); }
+}
+.chart-fill.amber{background:linear-gradient(90deg, #f59e0b, #fbbf24); box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);}
+.chart-fill.danger{background:linear-gradient(90deg, #ff4d6a, #ff8a65); box-shadow: 0 0 15px rgba(255, 77, 106, 0.3);}
+.chart-val{
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.95);
+  padding-right: 8px;
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.4);
+}
 
 /* ── DATA TABLE ── */
 .data-card{margin-top:11px;background:rgba(255,255,255,0.05);backdrop-filter:blur(14px);border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.1);}
@@ -475,7 +571,7 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .attach-menu-divider{height:1px;background:var(--border);margin:3px 6px;}
 
 .input-row{display:flex;align-items:center;gap:7px;}
-.chat-input{flex:1;border:none;background:transparent;font-family:inherit;font-size:13.5px;color:var(--text);resize:none;outline:none;min-height:22px;max-height:120px;line-height:1.55;display:block;vertical-align:middle;padding:0;}
+.chat-input{flex:1;border:none !important;background:transparent !important;font-family:inherit;font-size:13.5px;color:var(--text);resize:none;outline:none;min-height:22px;max-height:120px;line-height:1.55;display:block;vertical-align:middle;padding:0 !important;box-shadow:none !important;}
 .chat-input::placeholder{color:#8ea3c2;font-style:italic;}
 .input-actions{display:flex;align-items:center;gap:5px;flex-shrink:0;margin-bottom:1px;}
 .attach-btn{width:32px;height:32px;border-radius:7px;background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text3);transition:all .16s;position:relative;flex-shrink:0;}
@@ -635,13 +731,35 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .lightbox-close:hover{background:rgba(255,255,255,.2);}
 
 /* ── INTRO / SPLIT-TEXT ANIMATION ── */
-.intro-text-block{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;max-width:600px;width:100%;z-index:30;pointer-events:none;}
+.intro-text-block{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;max-width:600px;width:100%;z-index:30;pointer-events:none;display:flex;flex-direction:column;align-items:center;gap:12px;}
 .intro-text-block.fade-out{opacity:0;transition:opacity 0.7s ease;}
-.split-line{overflow:hidden;margin-bottom:8px;}
+.split-line{overflow:hidden;}
 .split-word{display:inline-block;opacity:0;transform:translateY(20px);animation:splitWordIn 0.4s ease-out forwards;}
 @keyframes splitWordIn{to{opacity:1;transform:translateY(0);}}
-.intro-line-1{font-family:'Syne',sans-serif;font-size:clamp(28px,4vw,42px);font-weight:900;background:linear-gradient(135deg,#3B82F6,#1DD1EE,#63DEF9);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
-.intro-line-2,.intro-line-3{font-size:16px;color:#cbd5e1;line-height:1.6;}
+
+.intro-greeting{
+  font-family:'Syne',sans-serif;
+  font-size:clamp(32px,5vw,48px);
+  font-weight:900;
+  background:linear-gradient(135deg,#3B82F6,#1DD1EE,#63DEF9);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+  opacity:0;
+  animation: greetingFloatIn 0.9s var(--ease-spring) forwards, greetingBob 3.5s ease-in-out infinite 0.9s;
+  animation-delay: var(--greeting-delay, 2.5s);
+  margin-bottom:8px;
+}
+@keyframes greetingFloatIn {
+  0% { opacity:0; transform: translateY(40px) scale(0.85); }
+  100% { opacity:1; transform: translateY(0) scale(1); }
+}
+@keyframes greetingBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.intro-line-2,.intro-line-3{font-size:16px;color:#cbd5e1;line-height:1.6;max-width:500px;}
 
 /* ── TYPEWRITER CURSOR ── */
 .typewriter-cursor{display:inline-block;width:2px;height:1em;background:linear-gradient(180deg,#3B82F6,#1DD1EE);margin-left:2px;animation:twBlink 0.8s step-end infinite;vertical-align:text-bottom;}
@@ -736,18 +854,20 @@ const fmtTime = (d: Date): string => d.toLocaleTimeString([], { hour: "2-digit",
 
 const ResponseChart: FC<{ data: ChartDataItem[] }> = ({ data }) => {
   const [animated, setAnimated] = useState(false);
-  const max = Math.max(...data.map((d: ChartDataItem) => d.value), 1);
   useEffect(() => { const t = setTimeout(() => setAnimated(true), 100); return () => clearTimeout(t); }, []);
   return (
     <div className="response-chart">
-      <div className="chart-title">▸ DATA VISUALIZATION</div>
+      <div className="chart-title">Visual breakdown</div>
       <div className="chart-bars">
         {data.map((bar: ChartDataItem, i: number) => (
           <div className="chart-row" key={i}>
             <div className="chart-label" title={bar.label}>{bar.label}</div>
             <div className="chart-track">
-              <div className={`chart-fill${bar.color ? " " + bar.color : ""}`} style={{ width: animated ? `${(bar.value / max) * 100}%` : "0%" }}>
-                <span className="chart-val">{bar.value}</span>
+              <div
+                className={`chart-fill${bar.color ? " " + bar.color : ""}`}
+                style={{ width: animated ? `${bar.value}%` : "0%" }}
+              >
+                <span className="chart-val">{bar.value}%</span>
               </div>
             </div>
           </div>
@@ -1095,22 +1215,7 @@ const Sidebar: FC<{ collapsed: boolean; onToggle: () => void; activeHist: string
   <aside className={`sidebar${collapsed ? " collapsed" : ""}`}>
     <div className="sb-head">
       <div className="logo-mark">
-        <svg width="28" height="28" viewBox="0 0 180 180" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="90" cy="90" r="72" fill="none" stroke="rgba(59,130,246,0.18)" strokeWidth="0.7" />
-          <g stroke="#3B82F6" strokeWidth="0.9" opacity="0.35">
-            <line x1="90" y1="32" x2="140" y2="61" /><line x1="140" y1="61" x2="140" y2="119" />
-            <line x1="140" y1="119" x2="90" y2="148" /><line x1="90" y1="148" x2="40" y2="119" />
-            <line x1="40" y1="119" x2="40" y2="61" /><line x1="40" y1="61" x2="90" y2="32" />
-          </g>
-          <polygon points="90,72 105,81 105,99 90,108 75,99 75,81" fill="rgba(29,78,216,0.18)" stroke="rgba(99,222,249,0.55)" strokeWidth="1.1" />
-          <circle cx="90" cy="90" r="2.8" fill="#63DEF9" />
-          <circle cx="90" cy="32" r="3.5" fill="#1D4ED8" stroke="#63DEF9" strokeWidth="1" />
-          <circle cx="140" cy="61" r="3.5" fill="#1D4ED8" stroke="#63DEF9" strokeWidth="1" />
-          <circle cx="140" cy="119" r="3.5" fill="#1D4ED8" stroke="#63DEF9" strokeWidth="1" />
-          <circle cx="90" cy="148" r="3.5" fill="#1D4ED8" stroke="#63DEF9" strokeWidth="1" />
-          <circle cx="40" cy="119" r="3.5" fill="#1D4ED8" stroke="#63DEF9" strokeWidth="1" />
-          <circle cx="40" cy="61" r="3.5" fill="#1D4ED8" stroke="#63DEF9" strokeWidth="1" />
-        </svg>
+        <NexusLogo size={40} />
       </div>
       {!collapsed && (
         <div className="logo-text">
@@ -1199,7 +1304,9 @@ const WelcomeScreen: FC<{ onSuggestion: (text: string) => void }> = ({ onSuggest
 // ── Chat Message ──
 const ChatMessage: FC<{ message: Message; onCopy: (text: string) => void; onImageClick: (src: string) => void }> = ({ message, onCopy, onImageClick }) => (
   <div className={`msg-row ${message.role}`}>
-    <div className={`avatar ${message.role}`}>{message.role === "ai" ? "NX" : "U"}</div>
+    <div className={`avatar ${message.role}`}>
+      {message.role === "ai" ? <NexusLogo size={32} /> : "U"}
+    </div>
     <div className={`bubble ${message.role}${message.isError ? " error" : ""}`}>
       <div className="bubble-meta">
         <span className="bubble-time">{fmtTime(message.timestamp)}</span>
@@ -1221,19 +1328,20 @@ const ChatMessage: FC<{ message: Message; onCopy: (text: string) => void; onImag
       )}
       {message.text}
       {message.chartData && message.chartData.length > 0 && <ResponseChart data={message.chartData} />}
-      {message.role === "ai" && message.confidence && (
-        <div className="msg-footer">
-          <span className="msg-badge conf">Confidence: {message.confidence}</span>
-          {message.sampleSize && <span className="msg-badge samp">{message.sampleSize.toLocaleString()} records</span>}
-          {message.execMs && <span className="msg-badge exec">{message.execMs.toFixed(0)}ms</span>}
-        </div>
-      )}
+
     </div>
   </div>
 );
 
 const TypingIndicator: FC = () => (
-  <div className="msg-row ai"><div className="avatar ai">NX</div><div className="bubble ai"><div className="typing"><span /><span /><span /></div></div></div>
+  <div className="msg-row ai">
+    <div className="avatar ai">
+      <NexusLogo size={32} />
+    </div>
+    <div className="bubble ai">
+      <div className="typing"><span /><span /><span /></div>
+    </div>
+  </div>
 );
 
 // ── Input Bar ──
@@ -1364,7 +1472,7 @@ const TYPEWRITER_PROMPTS = [
 
 // ── SplitText Intro ──
 const INTRO_LINES = [
-  { text: "Hi, I'm NEXUS.", className: "intro-line-1" },
+  { text: "Hi, I'm NEXUS.", className: "intro-greeting" },
   { text: "Your AI chatbot for payment analytics and transaction intelligence.", className: "intro-line-2" },
   { text: "Real-time insights, Clear explanations, Instant answers.", className: "intro-line-3" },
 ];
@@ -1372,21 +1480,35 @@ const INTRO_LINES = [
 const SplitTextIntro: FC<{ onDone: () => void }> = ({ onDone }) => {
   const [fadeOut, setFadeOut] = useState(false);
   useEffect(() => {
-    const holdTimer = setTimeout(() => setFadeOut(true), 5000);
-    const doneTimer = setTimeout(() => onDone(), 5700);
+    // Total intro duration: ~6.5s + fade-out
+    const holdTimer = setTimeout(() => setFadeOut(true), 6500);
+    const doneTimer = setTimeout(() => onDone(), 7200);
     return () => { clearTimeout(holdTimer); clearTimeout(doneTimer); };
   }, [onDone]);
 
-  let wordIndex = 0;
+  // Calculate greeting delay based on words in the descriptive lines (line 2 and 3)
+  const l2Words = INTRO_LINES[1].text.split(" ");
+  const l3Words = INTRO_LINES[2].text.split(" ");
+  const totalDescWords = l2Words.length + l3Words.length;
+  const greetingDelay = (totalDescWords * 0.08) + 0.6; // Wait for desc + small buffer
+
   return (
     <div className={`intro-text-block${fadeOut ? " fade-out" : ""}`}>
-      {INTRO_LINES.map((line, li) => {
+      {/* Greeting rendered first in DOM but delayed via CSS */}
+      <h1 className="intro-greeting" style={{ '--greeting-delay': `${greetingDelay}s` } as any}>
+        Hi, I'm NEXUS.
+      </h1>
+
+      {/* Description lines appear Word-by-word */}
+      {[INTRO_LINES[1], INTRO_LINES[2]].map((line, li) => {
         const words = line.text.split(" ");
+        // We count offset so second line words follow the first
+        const wordOffset = li === 1 ? l2Words.length : 0;
+
         return (
           <div key={li} className={`split-line ${line.className}`}>
             {words.map((word, wi) => {
-              const delay = wordIndex * 0.08 + 0.3;
-              wordIndex++;
+              const delay = (wordOffset + wi) * 0.08 + 0.3;
               return (
                 <span key={wi} className="split-word" style={{ animationDelay: `${delay}s` }}>
                   {word}{wi < words.length - 1 ? "\u00A0" : ""}
@@ -1424,6 +1546,7 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const copyTimer = useRef<NodeJS.Timeout | undefined>(undefined);
   const abortRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
@@ -1505,6 +1628,10 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
   };
 
   const handleStop = useCallback((): void => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
     if (abortRef.current) {
       clearTimeout(abortRef.current);
       abortRef.current = undefined;
@@ -1526,7 +1653,8 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     setActiveTab("Overview");
     try {
       const abortController = new AbortController();
-      const t = setTimeout(() => abortController.abort(), 60000); // 60s timeout
+      abortControllerRef.current = abortController;
+      const t = setTimeout(() => abortController.abort(), 180000); // 3 min timeout
       abortRef.current = t;
 
       const response = await fetch("http://localhost:8000/api/query", {
@@ -1552,17 +1680,24 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
         execMs: data.executionMs,
         chartData: data.chartData || makeDemoChart(text), // fallback to demo chart if none returned
       };
-
       setMessages(prev => [...prev, aiMsg]);
       const entry: HistoryItem = { id: Date.now().toString(), title: (text.trim() || (attachmentMeta[0]?.name ?? "File")).slice(0, 38), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
       setHistoryItems(prev => [entry, ...prev.slice(0, 14)]);
       setActiveHist(entry.id);
     } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") {
+        console.log("Query generation stopped by user.");
+        return;
+      }
       const errorMsg = err instanceof Error ? err.message : "Something went wrong.";
       setMessages(prev => [...prev, { id: Date.now() + "e", role: "ai", isError: true, timestamp: new Date(), text: `⚠ ${errorMsg}` }]);
     } finally {
+      if (abortRef.current) {
+        clearTimeout(abortRef.current);
+        abortRef.current = undefined;
+      }
       setIsTyping(false);
-      abortRef.current = undefined;
+      abortControllerRef.current = null;
     }
   };
 
@@ -1633,4 +1768,6 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     </>
   );
 }
+
+
 

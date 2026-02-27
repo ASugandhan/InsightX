@@ -56,10 +56,14 @@ class InsightXSystem:
         print("\n InsightX v2.1 ready! All fixes + guardrails active.")
         print("="*60 + "\n")
 
-    def ask(self, question: str, session_id: str = "default") -> dict:
+    def ask(self, question: str, session_id: str = "default", stop_event=None) -> dict:
         """
         Main entry point with all fixes + guardrails applied.
         """
+        def check_stop():
+            if stop_event and stop_event.is_set():
+                print("  [ABORTED] Query processing stopped due to client disconnect.")
+                raise Exception("ClientDisconnected")
         print(f"\n{'='*60}")
         print(f"Q: {question}")
         start_total = time.time()
@@ -71,6 +75,8 @@ class InsightXSystem:
         if not is_safe:
             print(f"  BLOCKED: {rejection_msg}")
             return self._blocked_response(question, rejection_msg)
+
+        check_stop()
 
         # Sanitize input
         question = self.guardrails.sanitize_input(question)
@@ -101,6 +107,7 @@ class InsightXSystem:
         # STEP 1: RAG - Financial domain knowledge
         # ----------------------------------------------------------------
         rag_context = ""
+        check_stop()
         if self.rag.should_use_rag(question):
             print("  Retrieving financial domain knowledge...")
             rag_context = self.rag.retrieve(question, n_results=3)
@@ -110,6 +117,7 @@ class InsightXSystem:
         # ----------------------------------------------------------------
         # ISSUE 2 + STEP 2: Gemini NLU with conversation history
         # ----------------------------------------------------------------
+        check_stop()
         print("  Understanding question & generating SQL...")
 
         # Use smart default SQL if available (Issue 3)
@@ -123,7 +131,8 @@ class InsightXSystem:
             nlu_result = self.nlu.understand(
                 question=question,
                 conversation_history=self.conversation_history,  # Issue 2
-                rag_context=rag_context
+                rag_context=rag_context,
+                stop_event=stop_event
             )
             sql = nlu_result.get("sql", "")
             intent = nlu_result.get("intent", question)
@@ -140,11 +149,12 @@ class InsightXSystem:
         # ----------------------------------------------------------------
         # ISSUE 1: Validate SQL for hallucinations
         # ----------------------------------------------------------------
+        check_stop()
         sql_validation = self.schema_validator.validate_sql(sql)
         if not sql_validation["is_valid"]:
             print(f"  HALLUCINATION DETECTED: {sql_validation['issues']}")
             # Try to fix with Gemini
-            sql = self.sql_fixer.fix(question, sql, str(sql_validation["issues"]))
+            sql = self.sql_fixer.fix(question, sql, str(sql_validation["issues"]), stop_event=stop_event)
             print(f"  Fixed SQL: {sql[:100]}...")
 
         # ----------------------------------------------------------------
@@ -158,30 +168,35 @@ class InsightXSystem:
         # ----------------------------------------------------------------
         # STEP 3: DuckDB - Execute on full 250,000 rows
         # ----------------------------------------------------------------
+        check_stop()
         print("  Querying full 250,000 row dataset...")
         start_query = time.time()
-        result = self._execute_sql_safely(question, sql)
+        result = self._execute_sql_safely(question, sql, stop_event=stop_event)
         exec_ms = (time.time() - start_query) * 1000
         print(f"  {len(result)} result rows in {exec_ms:.1f}ms")
 
         # ----------------------------------------------------------------
         # STEP 4: Intelligence Layer
         # ----------------------------------------------------------------
+        check_stop()
         print("  Running intelligence analysis...")
         intelligence = self.intelligence.analyze(result, intent, sql)
 
         # ----------------------------------------------------------------
         # STEP 5: Gemini Formatter
         # ----------------------------------------------------------------
+        check_stop()
         print("  Generating natural language answer...")
         raw_answer = self.formatter.format(
             question=question, result=result, intent=intent,
-            intelligence=intelligence, rag_context=rag_context
+            intelligence=intelligence, rag_context=rag_context,
+            stop_event=stop_event
         )
 
         # ----------------------------------------------------------------
         # GUARDRAIL: Sanitize output
         # ----------------------------------------------------------------
+        check_stop()
         answer = self.guardrails.check_output(raw_answer)
 
         total_ms = (time.time() - start_total) * 1000
@@ -210,14 +225,14 @@ class InsightXSystem:
             "needs_clarification": False
         }
 
-    def _execute_sql_safely(self, question: str, sql: str) -> pd.DataFrame:
+    def _execute_sql_safely(self, question: str, sql: str, stop_event=None) -> pd.DataFrame:
         """Execute SQL with Issue 4 fix: robust auto-correction."""
         try:
             return self.analytics.query(sql)
         except Exception as e:
             print(f"  SQL error: {e}. Auto-fixing...")
             try:
-                fixed_sql = self.sql_fixer.fix(question, sql, str(e))
+                fixed_sql = self.sql_fixer.fix(question, sql, str(e), stop_event=stop_event)
                 # Validate fixed SQL is safe before executing
                 safe, msg = self.guardrails.check_sql(fixed_sql)
                 if not safe:

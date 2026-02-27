@@ -10,6 +10,10 @@ from typing import List, Optional, Dict, Any
 import sys, traceback, uuid
 from datetime import datetime
 import pandas as pd
+import asyncio
+import threading
+import contextlib
+from fastapi.concurrency import run_in_threadpool
 
 sys.path.append('..')
 from main import InsightXSystem
@@ -98,7 +102,30 @@ async def query(request: QueryRequest, http_request: Request):
                 timestamp=datetime.now().isoformat(), blocked=True
             )
 
-        result = system.ask(request.question, session_id=session_id)
+        stop_event = threading.Event()
+
+        async def check_disconnect():
+            while not stop_event.is_set():
+                if await http_request.is_disconnected():
+                    print("Client disconnected, aborting query processing...")
+                    stop_event.set()
+                    break
+                await asyncio.sleep(0.5)
+
+        monitor_task = asyncio.create_task(check_disconnect())
+
+        try:
+            result = await run_in_threadpool(system.ask, request.question, session_id, stop_event)
+        except Exception as e:
+            if stop_event.is_set() or str(e) == "ClientDisconnected":
+                raise HTTPException(status_code=499, detail="Client Closed Request")
+            raise
+        finally:
+            stop_event.set()
+            monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor_task
+
         chart_data = _generate_chart_data(result.get("result"))
 
         return QueryResponse(
@@ -121,6 +148,8 @@ async def query(request: QueryRequest, http_request: Request):
             needsClarification=result.get("needs_clarification", False),
             blocked=result.get("blocked", False)
         )
+    except HTTPException:
+        raise
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(500, str(e))

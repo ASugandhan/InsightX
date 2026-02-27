@@ -99,10 +99,11 @@ class GeminiKeyManager:
             # Advance current index to next available key
             self._current_index = (key_index + 1) % len(self._keys)
 
-    def generate(self, model: str, contents: str) -> str:
+    def generate(self, model: str, contents: str, stop_event: threading.Event = None) -> str:
         """
         Try each key ONCE per request. Fails fast on all-rate-limited
         so caller can use smart fallback SQL immediately.
+        Uses streaming to abort early if stop_event is set.
         """
         last_error = None
         tried = set()
@@ -114,8 +115,19 @@ class GeminiKeyManager:
             tried.add(idx)
             try:
                 print(f"  KeyManager: Using {label} key")
-                response = client.models.generate_content(model=model, contents=contents)
-                return response.text
+                if stop_event and stop_event.is_set():
+                    print("  [ABORTED] Generate aborted before starting.")
+                    return "ABORTED"
+                
+                response_stream = client.models.generate_content_stream(model=model, contents=contents)
+                full_text = []
+                for chunk in response_stream:
+                    if stop_event and stop_event.is_set():
+                        print("  [ABORTED] Stopping Gemini generation mid-stream.")
+                        return "".join(full_text)
+                    if chunk.text:
+                        full_text.append(chunk.text)
+                return "".join(full_text)
             except Exception as e:
                 err_str = str(e)
                 if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():

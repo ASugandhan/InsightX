@@ -18,7 +18,7 @@ class GeminiResponseFormatter:
         print("GeminiResponseFormatter initialized (5-key rotation)")
 
     def format(self, question: str, result: pd.DataFrame, intent: str,
-               intelligence: dict, rag_context: str = "") -> str:
+               intelligence: dict, rag_context: str = "", stop_event=None) -> str:
 
         if result is None or result.empty:
             result_str = "No data found."
@@ -67,7 +67,9 @@ Your job:
 Respond naturally. No bullet points unless showing a breakdown."""
 
         try:
-            text = self.key_manager.generate(model=self.model, contents=prompt)
+            text = self.key_manager.generate(model=self.model, contents=prompt, stop_event=stop_event)
+            if text == "ABORTED":
+                return "Query generation stopped by user."
             return text.strip()
         except Exception as e:
             print(f"GeminiFormatter all keys failed: {e}")

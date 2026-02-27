@@ -98,7 +98,7 @@ class GeminiNLU:
         self.model = "models/gemini-flash-latest"
         print("GeminiNLU initialized (5-key rotation system)")
 
-    def understand(self, question: str, conversation_history: list, rag_context: str = "") -> dict:
+    def understand(self, question: str, conversation_history: list, rag_context: str = "", stop_event=None) -> dict:
         history_str = ""
         if conversation_history:
             history_str = "\nConversation history:\n"
@@ -131,7 +131,9 @@ Respond ONLY in this JSON format (no markdown, no explanation):
 
         try:
             # Uses key rotation automatically - primary first, then fallbacks on 429
-            raw = self.key_manager.generate(model=self.model, contents=prompt)
+            raw = self.key_manager.generate(model=self.model, contents=prompt, stop_event=stop_event)
+            if raw == "ABORTED":
+                return self._fallback(question, conversation_history)
             raw = re.sub(r'^```json\s*', '', raw, flags=re.MULTILINE)
             raw = re.sub(r'^```\s*', '', raw, flags=re.MULTILINE)
             raw = re.sub(r'```\s*$', '', raw, flags=re.MULTILINE)
@@ -144,7 +146,7 @@ Respond ONLY in this JSON format (no markdown, no explanation):
             print(f"GeminiNLU all keys failed: {e}")
             return self._fallback(question, conversation_history)
 
-    def fix_sql(self, question: str, bad_sql: str, error: str) -> str:
+    def fix_sql(self, question: str, bad_sql: str, error: str, stop_event=None) -> str:
         prompt = f"""Fix this DuckDB SQL query. Return ONLY the corrected SQL.
 
 Question: {question}
@@ -154,7 +156,9 @@ Table name: transactions
 Only use these columns: transaction_id, timestamp, sender_id, receiver_id, amount_inr, transaction_type, transaction_status, merchant_category, sender_bank, receiver_bank, sender_state, device_type, network_type, hour_of_day, is_weekend, sender_age_group, fraud_flag, failure_reason, latency_ms, sender_upi_app"""
 
         try:
-            raw = self.key_manager.generate(model=self.model, contents=prompt)
+            raw = self.key_manager.generate(model=self.model, contents=prompt, stop_event=stop_event)
+            if raw == "ABORTED":
+                return "ABORTED"
             raw = re.sub(r'^```sql\s*', '', raw, flags=re.MULTILINE)
             raw = re.sub(r'^```\s*', '', raw, flags=re.MULTILINE)
             raw = re.sub(r'```\s*$', '', raw, flags=re.MULTILINE)

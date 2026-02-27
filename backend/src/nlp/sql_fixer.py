@@ -29,7 +29,7 @@ class SQLFixer:
         self.model = "models/gemini-flash-latest"
         print("SQLFixer initialized (5-key rotation)")
 
-    def fix(self, question: str, bad_sql: str, error: str, max_retries: int = 2) -> str:
+    def fix(self, question: str, bad_sql: str, error: str, max_retries: int = 2, stop_event=None) -> str:
         # Step 1: Quick pattern fix (no API)
         quick = self._quick_fix(bad_sql, error)
         if quick:
@@ -59,7 +59,9 @@ Rules:
 - Return ONLY the SQL query"""
 
         try:
-            raw = self.key_manager.generate(model=self.model, contents=prompt)
+            raw = self.key_manager.generate(model=self.model, contents=prompt, stop_event=stop_event)
+            if raw == "ABORTED":
+                return SAFE_FALLBACK_SQL
             fixed = re.sub(r'^```sql\s*', '', raw, flags=re.MULTILINE)
             fixed = re.sub(r'^```\s*', '', fixed, flags=re.MULTILINE)
             fixed = re.sub(r'```\s*$', '', fixed, flags=re.MULTILINE)
