@@ -1,6 +1,13 @@
 import { useState, useRef, useEffect, useCallback, FC, ChangeEvent, KeyboardEvent, DragEvent } from "react";
 import NexusLogo from "./NexusLogo";
 
+declare global {
+  interface Window {
+    SpeechRecognition?: any;
+    webkitSpeechRecognition?: any;
+  }
+}
+
 // ── Type Definitions ──
 interface FileAttachment {
   id: string;
@@ -578,12 +585,16 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .attach-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,0.1);}
 .attach-btn.has-files{border-color:rgba(59,130,246,.45);color:var(--accent);background:rgba(59,130,246,.07);}
 .attach-badge{position:absolute;top:-5px;right:-5px;background:var(--accent);color:#fff;font-family:'DM Mono',monospace;font-size:8.5px;font-weight:700;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg1);}
+.mic-btn.listening{color:#ff6b6b;border-color:#ff6b6b;background:rgba(255,107,107,0.16);box-shadow:0 0 10px rgba(255,107,107,0.25);}
 .send-btn{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#ffffff 0%,#f0f0f0 100%);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#0a0e27;transition:all .2s var(--ease-out);box-shadow:0 4px 16px rgba(255,255,255,0.25);flex-shrink:0;font-weight:700;}
 .send-btn:hover:not(:disabled){box-shadow:0 8px 28px rgba(255,255,255,0.3);transform:scale(1.08) translateY(-2px);}
 .send-btn:disabled{opacity:.4;cursor:not-allowed;}
 
 .stop-btn{width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,#1D4ED8,#0ea5e9);border:1px solid rgba(99,222,249,0.4);cursor:pointer;display:flex;align-items:center;justify-content:center;color:#fff;transition:box-shadow .2s;flex-shrink:0;}
 .stop-btn:hover{box-shadow:0 0 12px rgba(29,209,238,0.4);}
+.listening-indicator{margin-top:6px;display:flex;align-items:center;gap:6px;font-family:'DM Mono',monospace;font-size:10px;color:#ff9ca8;}
+.listening-dot{width:7px;height:7px;border-radius:50%;background:#ff6b6b;animation:listenPulse 1s ease-in-out infinite;}
+@keyframes listenPulse{0%,100%{opacity:.45;transform:scale(1);}50%{opacity:1;transform:scale(1.2);}}
 
 /* ── COPY TOAST ── */
 .copy-toast{position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--accent);color:#000;font-family:'DM Mono',monospace;font-size:11px;font-weight:600;padding:5px 13px;border-radius:20px;box-shadow:0 4px 18px var(--glow);opacity:0;transition:all .22s var(--ease-spring);pointer-events:none;z-index:999;}
@@ -1353,7 +1364,7 @@ const ATTACH_MENU_ITEMS = [
   { icon: "📎", label: "Any File", sub: "All file types", accept: "*" },
 ];
 
-const InputBar: FC<{ input: string; isTyping: boolean; attachedFiles: FileAttachment[]; onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void; onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void; onSend: () => void; onStop: () => void; onFilesAttach: (files: File[]) => void; onRemoveAttach: (id: string) => void; textareaRef: React.RefObject<HTMLTextAreaElement>; typewriterText?: string }> = ({ input, isTyping, attachedFiles, onChange, onKeyDown, onSend, onStop, onFilesAttach, onRemoveAttach, textareaRef, typewriterText }) => {
+const InputBar: FC<{ input: string; isTyping: boolean; attachedFiles: FileAttachment[]; onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void; onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void; onSend: () => void; onStop: () => void; onVoiceToggle: () => void; isListening: boolean; speechSupported: boolean; onFilesAttach: (files: File[]) => void; onRemoveAttach: (id: string) => void; textareaRef: React.RefObject<HTMLTextAreaElement>; typewriterText?: string }> = ({ input, isTyping, attachedFiles, onChange, onKeyDown, onSend, onStop, onVoiceToggle, isListening, speechSupported, onFilesAttach, onRemoveAttach, textareaRef, typewriterText }) => {
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
   const [dragOver, setDragOver] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1424,6 +1435,21 @@ const InputBar: FC<{ input: string; isTyping: boolean; attachedFiles: FileAttach
               </svg>
             </button>
           </div>
+          {speechSupported && !isTyping && (
+            <button
+              className={`attach-btn mic-btn${isListening ? " listening active" : ""}`}
+              onClick={onVoiceToggle}
+              title={isListening ? "Stop voice input" : "Start voice input"}
+              aria-label={isListening ? "Stop voice input" : "Start voice input"}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3z" />
+                <path d="M19 11a7 7 0 0 1-14 0" />
+                <line x1="12" y1="18" x2="12" y2="22" />
+                <line x1="8" y1="22" x2="16" y2="22" />
+              </svg>
+            </button>
+          )}
           {isTyping ? (
             <button className="stop-btn" onClick={onStop} aria-label="Stop generation">
               <svg width="16" height="16" viewBox="0 0 16 16">
@@ -1439,6 +1465,12 @@ const InputBar: FC<{ input: string; isTyping: boolean; attachedFiles: FileAttach
           )}
         </div>
       </div>
+      {isListening && (
+        <div className="listening-indicator">
+          <span className="listening-dot" />
+          <span>Listening...</span>
+        </div>
+      )}
       <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handleFileChange} />
     </div>
   );
@@ -1538,6 +1570,8 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [showIntroText, setShowIntroText] = useState<boolean>(true);
   const [welcomeRevealed, setWelcomeRevealed] = useState<boolean>(false);
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const [speechSupported, setSpeechSupported] = useState<boolean>(false);
 
   // Typewriter state
   const [typewriterText, setTypewriterText] = useState<string>("");
@@ -1547,12 +1581,40 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
   const copyTimer = useRef<NodeJS.Timeout | undefined>(undefined);
   const abortRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", "dark");
   }, []);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, isTyping]);
+
+  useEffect(() => {
+    const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) return;
+    setSpeechSupported(true);
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-US";
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => setIsListening(false);
+    recognition.onerror = () => setIsListening(false);
+    recognition.onresult = (event: any) => {
+      const transcript = Array.from(event.results || [])
+        .map((r: any) => r[0]?.transcript || "")
+        .join(" ")
+        .trim();
+      if (!transcript) return;
+      setInput(prev => (prev ? `${prev} ${transcript}` : transcript));
+      requestAnimationFrame(() => autoResize());
+    };
+    recognitionRef.current = recognition;
+    return () => {
+      try { recognition.stop(); } catch { }
+      recognitionRef.current = null;
+    };
+  }, []);
 
   // ── Typewriter effect ──
   useEffect(() => {
@@ -1626,6 +1688,19 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     setActiveTab("Overview");
     sendMessage(text);
   };
+
+  const handleVoiceToggle = useCallback((): void => {
+    if (!recognitionRef.current) return;
+    if (isListening) {
+      recognitionRef.current.stop();
+      return;
+    }
+    try {
+      recognitionRef.current.start();
+    } catch {
+      setIsListening(false);
+    }
+  }, [isListening]);
 
   const handleStop = useCallback((): void => {
     if (abortControllerRef.current) {
@@ -1753,7 +1828,7 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
                     <div ref={bottomRef} />
                   </div>
                 )}
-                <InputBar input={input} isTyping={isTyping} attachedFiles={attachedFiles} onChange={(e: ChangeEvent<HTMLTextAreaElement>) => { setInput(e.target.value); autoResize(); }} onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }} onSend={() => sendMessage(input)} onStop={handleStop} onFilesAttach={handleFilesAttach} onRemoveAttach={handleRemoveAttach} textareaRef={textareaRef as React.RefObject<HTMLTextAreaElement>} typewriterText={typewriterText} />
+                <InputBar input={input} isTyping={isTyping} attachedFiles={attachedFiles} onChange={(e: ChangeEvent<HTMLTextAreaElement>) => { setInput(e.target.value); autoResize(); }} onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }} onSend={() => sendMessage(input)} onStop={handleStop} onVoiceToggle={handleVoiceToggle} isListening={isListening} speechSupported={speechSupported} onFilesAttach={handleFilesAttach} onRemoveAttach={handleRemoveAttach} textareaRef={textareaRef as React.RefObject<HTMLTextAreaElement>} typewriterText={typewriterText} />
               </>
             )}
             {activeTab === "Transactions" && <TransactionsPage />}
@@ -1768,6 +1843,9 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     </>
   );
 }
+
+
+
 
 
 
