@@ -892,7 +892,7 @@ const Sidebar: FC<{
 // ── Welcome Screen ──
 const WelcomeScreen: FC<{ onSuggestion: (text: string) => void }> = ({ onSuggestion }) => (
   <div className="welcome">
-    <h1>Hi, I'm NEXUS,</h1>
+    <h1>Hi I'm NEXUS,</h1>
     <p className="welcome-desc">
       Your AI chatbot for payment analytics and transaction intelligence<br /><br />
       Real-time insights, Clear explanations, Instant answers
