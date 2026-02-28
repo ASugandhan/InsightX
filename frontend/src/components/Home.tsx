@@ -403,6 +403,7 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .msg-row:hover .bubble-actions{opacity:1;}
 .bubble-action-btn{width:20px;height:20px;border-radius:5px;border:1px solid var(--border);background:var(--bg2);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text3);transition:all .14s;}
 .bubble-action-btn:hover{border-color:var(--accent);color:var(--accent);}
+.bubble-text{white-space:pre-wrap;word-break:break-word;line-height:1.75;}
 
 /* ── RESPONSE CHART ── */
 .response-chart{
@@ -1337,7 +1338,7 @@ const ChatMessage: FC<{ message: Message; onCopy: (text: string) => void; onImag
           )}
         </div>
       )}
-      {message.text}
+      <div className="bubble-text">{message.text}</div>
       {message.chartData && message.chartData.length > 0 && <ResponseChart data={message.chartData} />}
 
     </div>
@@ -1843,6 +1844,7 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     </>
   );
 }
+
 
 
 

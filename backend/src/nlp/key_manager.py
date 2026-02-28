@@ -25,6 +25,11 @@ FALLBACK_KEYS = [
 ]
 ALL_KEYS = [PRIMARY_KEY] + FALLBACK_KEYS
 KEY_COOLDOWN_SECONDS = 62  # 1 min + buffer  # How long before a rate-limited key is retried
+# Conservative strategy controls:
+# - max keys attempted per request (default: 1 = only primary-style single attempt)
+# - whether to wait when all keys are cooling down (default: false = fail fast)
+MAX_KEYS_PER_REQUEST = max(1, int(os.getenv("GEMINI_MAX_KEYS_PER_REQUEST", "1")))
+WAIT_WHEN_ALL_KEYS_LIMITED = os.getenv("GEMINI_WAIT_ON_ALL_LIMITED", "false").lower() == "true"
 
 
 class GeminiKeyManager:
@@ -49,7 +54,7 @@ class GeminiKeyManager:
 
         print(f"GeminiKeyManager: {len(self._keys)} keys loaded (1 primary + {len(FALLBACK_KEYS)} fallbacks)")
 
-    def get_client(self) -> tuple:
+    def get_client(self, wait_if_all_limited: bool = True) -> tuple:
         """
         Get the current active client and its key index.
         Returns: (client, key_index, key_label)
@@ -78,6 +83,10 @@ class GeminiKeyManager:
                 return self._clients[key], idx, label
 
             # All keys are rate-limited
+            # Either fail fast or wait for the soonest key
+            if not wait_if_all_limited:
+                raise Exception("All keys are currently rate-limited")
+
             # Use the one whose cooldown expires soonest
             soonest_key = min(self._rate_limited_until, key=self._rate_limited_until.get)
             soonest_idx = self._keys.index(soonest_key)
@@ -101,15 +110,18 @@ class GeminiKeyManager:
 
     def generate(self, model: str, contents: str, stop_event: threading.Event = None) -> str:
         """
-        Try each key ONCE per request. Fails fast on all-rate-limited
-        so caller can use smart fallback SQL immediately.
+        Conservative if/else-style key usage:
+        - Try PRIMARY first.
+        - Optionally try limited fallbacks (controlled by GEMINI_MAX_KEYS_PER_REQUEST).
+        - Fail fast if all are cooling down (unless GEMINI_WAIT_ON_ALL_LIMITED=true).
         Uses streaming to abort early if stop_event is set.
         """
         last_error = None
         tried = set()
+        max_attempts = min(len(self._keys), MAX_KEYS_PER_REQUEST)
 
-        for attempt in range(len(self._keys)):
-            client, idx, label = self.get_client()
+        for attempt in range(max_attempts):
+            client, idx, label = self.get_client(wait_if_all_limited=WAIT_WHEN_ALL_KEYS_LIMITED)
             if idx in tried:
                 break
             tried.add(idx)
@@ -138,7 +150,10 @@ class GeminiKeyManager:
                 else:
                     raise e
 
-        raise Exception(f"All {len(self._keys)} Gemini API keys rate-limited. Last error: {last_error}")
+        raise Exception(
+            f"Gemini request failed after {len(tried)} key attempt(s). "
+            f"Max allowed per request: {MAX_KEYS_PER_REQUEST}. Last error: {last_error}"
+        )
 
     def status(self) -> dict:
         """Return current status of all keys."""
