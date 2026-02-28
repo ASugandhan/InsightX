@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, FC, ChangeEvent, KeyboardEvent } from "react";
 import NexusLogo from "./NexusLogo";
 import { indexdbService } from "../services/indexdbService";
+import LoginCard from "./LoginCard";
 
 declare global {
   interface Window {
@@ -10,19 +11,12 @@ declare global {
 }
 
 // ── Type Definitions ──
-interface FileAttachment {
-  id: string;
-  file: File;
-  type: string;
-  preview?: string;
-}
 
 interface Message {
   id: string;
   role: "user" | "ai";
   text: string;
   timestamp: Date;
-  attachments?: { name: string; type: string; preview?: string }[];
   chartData?: ChartDataItem[];
   chartType?: ChartType;
   confidence?: string;
@@ -252,9 +246,10 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .nb-pulse{width:10px;height:10px;border-radius:50%;background:var(--danger);flex-shrink:0;animation:nbPulse 2s infinite;}
 @keyframes nbPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(1.3)}}
 .nb-text{font-size:14px;color:#ffffff;font-weight:500;}
-.nb-text strong{color:var(--accent2);font-weight:700;}
-.nb-cta{font-size:12px;color:var(--accent2);white-space:nowrap;font-weight:600;display:flex;align-items:center;gap:4px;border:none;padding:0;background:none;cursor:pointer;transition:all .2s;}
-.nb-cta:hover{color:var(--accent);}
+.nb-text strong{color:var(--amber);font-weight:700;}
+.nb-text em{color:#E2E8F0;font-style:normal;opacity:0.9;}
+.nb-cta{font-size:12px;color:var(--amber);white-space:nowrap;font-weight:600;display:flex;align-items:center;gap:4px;border:none;padding:0;background:none;cursor:pointer;transition:all .2s;}
+.nb-cta:hover{color:var(--text);opacity:0.8;}
 
 /* ── KPI CARDS ── */
 .kpi-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;width:100%;}
@@ -323,8 +318,20 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .msg-row.user{flex-direction:row-reverse;}
 .avatar{width:32px;height:32px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;}
 .avatar.ai{background:transparent;box-shadow:none;}
-.avatar.user{background:rgba(17,28,46,0.4);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);color:var(--text2);}
-[data-theme="light"] .avatar.user{background:rgba(240,245,255,0.3);border-color:rgba(0,0,0,0.08);}
+.avatar.user{background:transparent;border:none;}
+[data-theme="light"] .avatar.user{background:transparent;border-color:transparent;}
+
+.user-avatar-icon {
+  background-color: rgba(0, 191, 255, 0.15);
+  border-radius: 8px;
+  padding: 6px;
+  color: #00BFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
 .bubble{max-width:72%;padding:18px 22px;border-radius:13px;font-size:15px;line-height:1.8;border:1px solid transparent;position:relative;}
 .bubble.user{background:rgba(59,130,246,0.12);border-color:rgba(59,130,246,0.35);border-bottom-right-radius:4px;backdrop-filter:blur(12px);}
 [data-theme="light"] .bubble.user{background:linear-gradient(135deg,rgba(29,78,216,.07),rgba(14,165,233,.04));border-color:rgba(29,78,216,.2);}
@@ -403,35 +410,28 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .drag-hint{position:absolute;inset:0;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:var(--accent);background:rgba(8,13,20,.88);backdrop-filter:blur(6px);pointer-events:none;opacity:0;transition:opacity .2s;z-index:10;}
 .input-zone.drag-over .drag-hint{opacity:1;}
 
-.attach-preview-row{display:flex;flex-wrap:wrap;gap:8px;padding-bottom:12px;margin-bottom:8px;border-bottom:1px solid var(--border);}
-.attach-thumb{position:relative;border-radius:7px;overflow:visible;display:flex;flex-direction:column;align-items:center;}
-.attach-thumb img{width:58px;height:46px;object-fit:cover;border-radius:7px;border:1px solid var(--border2);display:block;}
-.attach-thumb-file{width:58px;height:46px;border-radius:7px;background:var(--bg2);border:1px solid var(--border2);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;}
-.attach-thumb-file-icon{font-size:18px;line-height:1;}
-.attach-thumb-file-ext{font-size:7.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em;background:rgba(0,229,160,.1);padding:1px 4px;border-radius:3px;}
-.attach-thumb-name{font-size:8px;color:var(--text3);max-width:58px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;margin-top:2px;}
-.attach-remove-btn{position:absolute;top:-5px;right:-5px;width:16px;height:16px;border-radius:50%;background:var(--danger);border:2px solid var(--bg1);color:#fff;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .14s;z-index:5;}
-.attach-remove-btn:hover{transform:scale(1.18);}
-
-.attach-menu-wrap{position:relative;}
-.attach-menu{position:absolute;bottom:calc(100% + 10px);right:0;background:rgba(3,5,9,0.72);backdrop-filter:blur(18px);border:1px solid rgba(255,255,255,0.17);border-radius:11px;padding:6px;min-width:195px;z-index:50;box-shadow:0 14px 44px rgba(0,0,0,0.38);animation:attachMenuIn .18s var(--ease-spring) both;}
-@keyframes attachMenuIn{from{opacity:0;transform:translateY(6px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
-.attach-menu-item{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:7px;cursor:pointer;transition:background .12s,color .12s;font-size:12.5px;color:var(--text2);}
-.attach-menu-item:hover{background:rgba(0,229,160,.08);color:var(--text);}
-[data-theme="light"] .attach-menu-item:hover{background:rgba(0,122,82,.07);}
-.attach-menu-item:hover .ami-icon{color:var(--accent);}
-.ami-icon{font-size:15px;width:20px;text-align:center;color:var(--text3);transition:color .12s;flex-shrink:0;}
-.ami-label{flex:1;}.ami-sub{font-size:9px;color:var(--text3);}
-.attach-menu-divider{height:1px;background:var(--border);margin:3px 6px;}
 
 .input-row{display:flex;align-items:center;gap:7px;}
 .chat-input{flex:1;border:none !important;background:transparent !important;font-size:13.5px;color:var(--text);resize:none;outline:none;min-height:22px;max-height:120px;line-height:1.55;display:block;vertical-align:middle;padding:0 !important;box-shadow:none !important;}
 .chat-input::placeholder{color:#8ea3c2;font-style:italic;}
 .input-actions{display:flex;align-items:center;gap:5px;flex-shrink:0;margin-bottom:1px;}
-.attach-btn{width:32px;height:32px;border-radius:7px;background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text3);transition:all .16s;position:relative;flex-shrink:0;}
-.attach-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,0.1);}
-.attach-btn.has-files{border-color:rgba(59,130,246,.45);color:var(--accent);background:rgba(59,130,246,.07);}
-.attach-badge{position:absolute;top:-5px;right:-5px;background:var(--accent);color:#fff;font-size:8.5px;font-weight:700;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:2px solid var(--bg1);}
+.report-btn{
+  height:32px;padding:0 10px;border-radius:7px;
+  background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,0.15);cursor:pointer;
+  color:var(--text2);font-size:11px;font-weight:600;letter-spacing:.02em;
+  transition:all .16s;white-space:nowrap;
+}
+.report-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,0.1);}
+.report-btn:disabled{opacity:.45;cursor:not-allowed;}
+.mic-btn{
+  width:32px;height:32px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,0.15);color:var(--text2);
+  transition:all .15s;flex-shrink:0;
+}
+.mic-btn:hover:not(:disabled){background:rgba(255,255,255,0.1);border-color:rgba(255,255,255,0.25);color:var(--text);}
 .mic-btn.listening{color:#ff6b6b;border-color:#ff6b6b;background:rgba(255,107,107,0.16);box-shadow:0 0 10px rgba(255,107,107,0.25);}
 .send-btn{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#ffffff 0%,#f0f0f0 100%);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:#0a0e27;transition:all .2s var(--ease-out);box-shadow:0 4px 16px rgba(255,255,255,0.25);flex-shrink:0;font-weight:700;}
 .send-btn:hover:not(:disabled){box-shadow:0 8px 28px rgba(255,255,255,0.3);transform:scale(1.08) translateY(-2px);}
@@ -554,6 +554,117 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .modal-toggle{text-align:center;margin-top:13px;font-size:12px;color:var(--text3);}
 .modal-toggle button{background:none;border:none;cursor:pointer;color:var(--accent);font-size:12px;font-weight:600;text-decoration:underline;}
 
+.modal-overlay{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,0.65);
+  backdrop-filter:blur(14px);
+  z-index:100;
+  display:flex;align-items:center;justify-content:center;
+  animation:fadeIn .22s ease;
+}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+.login-card{
+  position:relative;
+  width:min(420px,94vw);
+  background:rgba(8,16,32,0.78);
+  backdrop-filter:blur(36px);
+  border:1.5px solid rgba(59,130,246,0.28);
+  border-radius:24px;
+  padding:44px 40px 36px;
+  box-shadow:
+    0 40px 100px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(59,130,246,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.07);
+  animation:cardSlideUp .32s var(--ease-spring) both;
+  overflow:hidden;
+}
+@keyframes cardSlideUp{
+  from{opacity:0;transform:translateY(28px) scale(0.96);}
+  to{opacity:1;transform:translateY(0) scale(1);}
+}
+.login-card-bar{
+  position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,#3B82F6 0%,#1DD1EE 50%,#a78bfa 100%);
+  border-radius:24px 24px 0 0;
+}
+.login-card::after{
+  content:'';position:absolute;top:-60px;right:-60px;
+  width:200px;height:200px;
+  background:radial-gradient(circle,rgba(59,130,246,0.12) 0%,transparent 70%);
+  pointer-events:none;
+}
+.login-card-close{
+  position:absolute;top:16px;right:16px;
+  width:30px;height:30px;border-radius:8px;
+  background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+  color:var(--text3);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .14s;z-index:2;
+}
+.login-card-close:hover{background:rgba(255,77,106,0.12);border-color:rgba(255,77,106,0.3);color:var(--danger);}
+.login-brand{display:flex;align-items:center;gap:11px;margin-bottom:28px;}
+.login-brand-name{font-size:15px;font-weight:900;letter-spacing:-.03em;color:#fff;}
+.login-brand-name em{color:var(--accent);font-style:normal;}
+.login-brand-tag{font-size:8.5px;color:var(--text3);letter-spacing:.12em;text-transform:uppercase;margin-top:1px;}
+.login-heading{font-size:24px;font-weight:900;letter-spacing:-.05em;color:#fff;margin-bottom:6px;}
+.login-subheading{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:30px;}
+.login-field{margin-bottom:16px;}
+.login-field-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.login-label{font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;}
+.login-forgot{font-size:10px;color:var(--accent2);cursor:pointer;transition:color .14s;background:none;border:none;padding:0;}
+.login-forgot:hover{color:var(--accent);}
+.login-input-wrap{position:relative;}
+.login-input-icon{
+  position:absolute;left:13px;top:50%;transform:translateY(-50%);
+  color:var(--text3);font-size:13px;pointer-events:none;transition:color .15s;
+}
+.login-input{
+  width:100%;padding:11px 13px 11px 38px;
+  background:rgba(255,255,255,0.04);backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,0.1);border-radius:10px;
+  font-size:13.5px;color:var(--text);outline:none;
+  transition:border-color .18s,box-shadow .18s,background .18s;
+}
+.login-input::placeholder{color:rgba(160,174,192,0.55);}
+.login-input:focus{border-color:rgba(59,130,246,0.55);box-shadow:0 0 0 3px rgba(59,130,246,0.12);background:rgba(59,130,246,0.04);}
+.login-input:focus + .login-input-icon,.login-input-wrap:focus-within .login-input-icon{color:var(--accent);}
+.login-submit{
+  width:100%;padding:13px;margin-top:6px;
+  background:linear-gradient(135deg,#1D4ED8 0%,#0ea5e9 100%);
+  border:none;border-radius:11px;font-size:14px;font-weight:700;color:#fff;
+  cursor:pointer;box-shadow:0 4px 20px rgba(29,78,216,0.38);
+  transition:all .2s var(--ease-out);position:relative;overflow:hidden;
+}
+.login-submit::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.1),transparent);opacity:0;transition:opacity .2s;}
+.login-submit:hover{box-shadow:0 8px 32px rgba(29,78,216,0.55);transform:translateY(-2px);}
+.login-submit:hover::before{opacity:1;}
+.login-submit:active{transform:translateY(0);box-shadow:0 4px 16px rgba(29,78,216,0.35);}
+.login-trust{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:20px;font-size:10px;color:var(--text3);}
+.login-trust-dot{width:3px;height:3px;border-radius:50%;background:var(--text3);opacity:.4;}
+
+/* ── DELETE MODAL ── */
+.del-modal{
+  background:rgba(20,20,30,0.95);backdrop-filter:blur(30px);
+  border:1.5px solid rgba(255,255,255,0.1);border-radius:24px;
+  padding:40px;width:min(440px,94vw);box-shadow:0 40px 100px rgba(0,0,0,0.6);
+  animation:cardSlideUp .3s var(--ease-spring) both;
+}
+.del-title{font-size:22px;font-weight:900;color:#fff;margin-bottom:12px;letter-spacing:-.03em;}
+.del-desc{font-size:14px;color:var(--text2);line-height:1.6;margin-bottom:32px;}
+.del-actions{display:flex;justify-content:flex-end;gap:12px;}
+.del-btn{
+  padding:12px 28px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;
+  transition:all .2s;border:none;
+}
+.del-btn.cancel{background:rgba(255,255,255,0.08);color:var(--text2);}
+.del-btn.cancel:hover{background:rgba(255,255,255,0.12);color:#fff;}
+.del-btn.confirm{
+  background:rgba(255,107,107,0.15);border:1px solid rgba(255,107,107,0.3);color:#ff6b6b;
+  box-shadow:0 4px 16px rgba(255,107,107,0.1);
+}
+.del-btn.confirm:hover{background:rgba(255,107,107,0.25);border-color:#ff6b6b;transform:translateY(-1px);}
+
 /* ── LIGHTBOX ── */
 .lightbox-overlay{position:fixed;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(12px);z-index:200;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s ease;cursor:zoom-out;}
 .lightbox-img{max-width:90vw;max-height:88vh;border-radius:10px;box-shadow:0 24px 72px rgba(0,0,0,.7);}
@@ -576,19 +687,55 @@ body{background:var(--bg);color:var(--text);margin:0;}
 @media(max-width:960px){.two-col-grid{grid-template-columns:1fr;}.three-col-grid{grid-template-columns:1fr 1fr;}.live-feed-panel{display:none;}}
 @media(max-width:720px){.app{padding:0;gap:0;}.sidebar{border-radius:0;border-left:0;border-top:0;border-bottom:0;}.main{border-radius:0;border:0;}.topbar,.tab-view{width:100%;margin:0;border-radius:0;border-left:0;border-right:0;}.kpi-strip{grid-template-columns:1fr 1fr;}.suggestions{grid-template-columns:1fr;}.chat-area{padding:14px 12px;}.input-zone{padding:8px 12px 12px;}.status-pill{display:none;}.bubble{max-width:88%;}}
 @media(max-width:480px){.kpi-strip{grid-template-columns:1fr 1fr;}.welcome h1{font-size:24px;}.topbar{padding:0 10px;}.topbar-center{display:none;}}
+
+.login-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(0, 191, 255, 0.25);
+  border-radius: 12px;
+  padding: 12px 16px;
+  color: #ffffff;
+  font-size: 14px;
+  cursor: pointer;
+  width: 100%;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.login-button:hover {
+  background-color: rgba(0, 191, 255, 0.08);
+  border-color: rgba(0, 191, 255, 0.5);
+}
+
+.login-button .left-icon {
+  background-color: rgba(0, 191, 255, 0.15);
+  border-radius: 8px;
+  padding: 6px;
+  color: #00BFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 12px;
+}
+
+.login-button .chevron {
+  color: #00BFFF;
+  font-size: 14px;
+}
+
+.sidebar.collapsed .login-button {
+  padding: 12px 0;
+  justify-content: center;
+  border-radius: 12px;
+}
+
+.sidebar.collapsed .login-button .left-icon {
+  margin-right: 0;
+}
 `;
 
 // ── Data ──
-const getFileType = (file: File): string => {
-  const m = file.type;
-  if (m.startsWith("image/")) return "image";
-  if (m === "application/pdf") return "pdf";
-  if (m === "text/csv" || file.name.endsWith(".csv")) return "csv";
-  if (m.includes("excel") || m.includes("spreadsheet") || file.name.match(/\.xlsx?$/)) return "excel";
-  if (m.includes("word") || file.name.match(/\.docx?$/)) return "doc";
-  return "other";
-};
-const FILE_ICONS = { image: "🖼️", pdf: "📄", csv: "📊", excel: "📗", doc: "📝", other: "📎" };
 
 const KPI_CARDS = [
   { icon: "💰", label: "Total GMV Today", value: "$4.82M", delta: "+12.4%", dir: "up", variant: "" },
@@ -604,7 +751,6 @@ const SUGGESTIONS = [
   { tag: "growth", tagLabel: "GROWTH", icon: "📈", title: "Top merchant performance", desc: "Show top 10 merchants by GMV growth quarter-over-quarter" },
 ];
 
-const CHART_BARS = [42, 58, 51, 67, 73, 55, 88, 64, 79, 91, 70, 85];
 
 const makeDemoChart = (text: string): ChartDataItem[] | undefined => {
   const t = text.toLowerCase();
@@ -879,12 +1025,17 @@ const Sidebar: FC<{
       )}
     </div>
     <div className="sb-foot" style={{ padding: "12px", borderTop: "1px solid var(--border)", flexShrink: 0 }}>
-      <button
-        className="auth-btn login-btn"
-        style={{ width: "100%", padding: "8px", borderRadius: "8px", fontSize: 13 }}
-        onClick={onLogin}
-        title="Log in"
-      >{collapsed ? "→" : "Log in"}</button>
+      <button className="login-button" onClick={onLogin} title="Log in">
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <div className="left-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+            </svg>
+          </div>
+          {!collapsed && <span className="login-label">Log in</span>}
+        </div>
+        {!collapsed && <span className="chevron">›</span>}
+      </button>
     </div>
   </aside>
 );
@@ -921,21 +1072,17 @@ const WelcomeScreen: FC<{ onSuggestion: (text: string) => void }> = ({ onSuggest
 const ChatMessage: FC<{ message: Message; onCopy: (text: string) => void; onImageClick: (src: string) => void }> = ({ message, onCopy, onImageClick }) => (
   <div className={`msg-row ${message.role}`}>
     <div className={`avatar ${message.role}`}>
-      {message.role === "ai" ? <NexusLogo size={32} /> : "U"}
-    </div>
-    <div className={`bubble ${message.role}${message.isError ? " error" : ""}`}>
-      {message.attachments && message.attachments.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-          {message.attachments.map((att: any, i: number) =>
-            att.preview
-              ? <img key={i} src={att.preview} alt={att.name} style={{ width: 110, height: 75, borderRadius: 8, objectFit: "cover", border: "1px solid var(--border2)", cursor: "pointer" }} onClick={() => onImageClick(att.preview)} />
-              : <div key={i} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 10px", background: "var(--bg2)", border: "1px solid var(--border2)", borderRadius: 8, fontSize: 11, color: "var(--text2)" }}>
-                <span style={{ fontSize: 16 }}>{FILE_ICONS[att.type as keyof typeof FILE_ICONS] || "📎"}</span>
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 140 }}>{att.name}</span>
-              </div>
-          )}
+      {message.role === "ai" ? (
+        <NexusLogo size={32} />
+      ) : (
+        <div className="user-avatar-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="18" height="18">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+          </svg>
         </div>
       )}
+    </div>
+    <div className={`bubble ${message.role}${message.isError ? " error" : ""}`}>
       <div className="bubble-text">{message.text}</div>
       {message.chartData && message.chartData.length > 0 && <ResponseChart data={message.chartData} chartType={message.chartType} />}
       <div className="bubble-meta">
@@ -956,107 +1103,54 @@ const TypingIndicator: FC = () => (
 );
 
 // ── Auth Modal ──
-const AuthModal: FC<{ mode: string; onClose: () => void; onToggleMode: () => void }> = ({ mode, onClose, onToggleMode }) => (
-  <div className="modal-overlay" onClick={onClose}>
-    <div className="modal" onClick={e => e.stopPropagation()}>
-      <button className="modal-close" onClick={onClose}>✕</button>
-      <h2>{mode === "login" ? "Welcome back" : "Create account"}</h2>
-      <p>{mode === "login" ? "Log in to your NEXUS workspace." : "Start making smarter payment decisions."}</p>
-      {mode === "signup" && <div className="field"><label>Full Name</label><input type="text" placeholder="Jane Doe" /></div>}
-      <div className="field"><label>Work Email</label><input type="email" placeholder="jane@company.com" /></div>
-      <div className="field"><label>Password</label><input type="password" placeholder="••••••••" /></div>
-      <button className="modal-submit">{mode === "login" ? "Log in →" : "Create account →"}</button>
-      <div className="modal-toggle">{mode === "login" ? "Don't have an account? " : "Already have an account? "}<button onClick={onToggleMode}>{mode === "login" ? "Sign up" : "Log in"}</button></div>
+const AuthModal: FC<{ mode: string; onClose: () => void; onToggleMode: () => void }> = ({ onClose }) => (
+  <LoginCard onClose={onClose} />
+);
+
+// ── Delete Confirm Modal ──
+const DeleteConfirmModal: FC<{ onConfirm: () => void; onCancel: () => void }> = ({ onConfirm, onCancel }) => (
+  <div className="modal-overlay" onClick={onCancel}>
+    <div className="del-modal" onClick={e => e.stopPropagation()}>
+      <div className="del-title">Delete Conversation</div>
+      <div className="del-desc">Are you sure you want to delete this chat permanently? This action cannot be undone.</div>
+      <div className="del-actions">
+        <button className="del-btn cancel" onClick={onCancel}>Cancel</button>
+        <button className="del-btn confirm" onClick={onConfirm}>Delete Permanently</button>
+      </div>
     </div>
   </div>
 );
 
 // ── Input Bar ──
-const ATTACH_MENU_ITEMS = [
-  { icon: "🖼️", label: "Image", sub: "PNG, JPG, WEBP, GIF", accept: "image/*" },
-  { icon: "📄", label: "PDF", sub: "Any PDF document", accept: "application/pdf" },
-  { icon: "📊", label: "Spreadsheet", sub: "CSV, XLS, XLSX", accept: ".csv,.xls,.xlsx" },
-  { icon: "📝", label: "Document", sub: "DOC, DOCX, TXT", accept: ".doc,.docx,.txt" },
-  { icon: "📎", label: "Any File", sub: "All file types", accept: "*" },
-];
 
 const InputBar: FC<{
-  input: string; isTyping: boolean; attachedFiles: FileAttachment[];
+  input: string; isTyping: boolean;
   onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void; onStop: () => void; onVoiceToggle: () => void;
+  onGenerateReport: () => void; canGenerateReport: boolean;
   isListening: boolean; speechSupported: boolean;
-  onFilesAttach: (files: File[]) => void; onRemoveAttach: (id: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement>; typewriterText?: string;
-}> = ({ input, isTyping, attachedFiles, onChange, onKeyDown, onSend, onStop, onVoiceToggle, isListening, speechSupported, onFilesAttach, onRemoveAttach, textareaRef, typewriterText }) => {
-  const [menuOpen, setMenuOpen] = useState<boolean>(false);
-  const [dragOver, setDragOver] = useState<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menuOpen) return;
-    const h = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [menuOpen]);
-  const openPicker = (accept: string) => { setMenuOpen(false); setTimeout(() => { if (fileInputRef.current) { fileInputRef.current.accept = accept; fileInputRef.current.click(); } }, 50); };
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => { if (e.target.files) { onFilesAttach(Array.from(e.target.files)); e.target.value = ""; } };
-  const canSend = (input.trim() || attachedFiles.length > 0) && !isTyping;
+}> = ({ input, isTyping, onChange, onKeyDown, onSend, onStop, onVoiceToggle, onGenerateReport, canGenerateReport, isListening, speechSupported, textareaRef, typewriterText }) => {
+  const canSend = input.trim() && !isTyping;
   return (
-    <div
-      className={`input-zone${dragOver ? " drag-over" : ""}`}
-      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files) onFilesAttach(Array.from(e.dataTransfer.files)); }}
-    >
-      <div className="drag-hint">⬇ Drop files here to attach</div>
-      {attachedFiles.length > 0 && (
-        <div className="attach-preview-row">
-          {attachedFiles.map((af: FileAttachment) => (
-            <div key={af.id} className="attach-thumb">
-              {af.preview
-                ? <img src={af.preview} alt={af.file.name} />
-                : <div className="attach-thumb-file"><span className="attach-thumb-file-icon">{FILE_ICONS[af.type as keyof typeof FILE_ICONS]}</span><span className="attach-thumb-file-ext">{af.file.name.split(".").pop()?.slice(0, 5)}</span></div>}
-              <div className="attach-thumb-name" title={af.file.name}>{af.file.name}</div>
-              <button className="attach-remove-btn" onClick={() => onRemoveAttach(af.id)}>✕</button>
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="input-zone">
       <div className="input-row">
         <textarea
           ref={textareaRef}
           className="chat-input"
           rows={1}
-          placeholder={attachedFiles.length > 0 ? "Add context… (optional)" : (typewriterText || "Ask NEXUS anything about your payments...")}
+          placeholder={typewriterText || ""}
           value={input}
           onChange={onChange}
           onKeyDown={onKeyDown}
         />
         <div className="input-actions">
-          <div className="attach-menu-wrap" ref={menuRef}>
-            {menuOpen && (
-              <div className="attach-menu">
-                {ATTACH_MENU_ITEMS.map((item, i) => (
-                  <div key={i}>
-                    {i === 4 && <div className="attach-menu-divider" />}
-                    <div className="attach-menu-item" onClick={() => openPicker(item.accept)}>
-                      <span className="ami-icon">{item.icon}</span>
-                      <div className="ami-label"><div>{item.label}</div><div className="ami-sub">{item.sub}</div></div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button className={`attach-btn${attachedFiles.length > 0 ? " has-files" : ""}${menuOpen ? " active" : ""}`} onClick={() => setMenuOpen(o => !o)} title="Attach files">
-              {attachedFiles.length > 0 && <span className="attach-badge">{attachedFiles.length}</span>}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-              </svg>
-            </button>
-          </div>
+          <button className="report-btn" onClick={onGenerateReport} disabled={!canGenerateReport} title="Generate report from this chat">
+            Generate Report
+          </button>
           {speechSupported && !isTyping && (
-            <button className={`attach-btn mic-btn${isListening ? " listening active" : ""}`} onClick={onVoiceToggle} title={isListening ? "Stop voice input" : "Start voice input"} aria-label={isListening ? "Stop voice input" : "Start voice input"}>
+            <button className={`mic-btn${isListening ? " listening active" : ""}`} onClick={onVoiceToggle} title={isListening ? "Stop voice input" : "Start voice input"} aria-label={isListening ? "Stop voice input" : "Start voice input"}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 14a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0v4a3 3 0 0 0 3 3z" /><path d="M19 11a7 7 0 0 1-14 0" />
                 <line x1="12" y1="18" x2="12" y2="22" /><line x1="8" y1="22" x2="16" y2="22" />
@@ -1077,7 +1171,6 @@ const InputBar: FC<{
         </div>
       </div>
       {isListening && <div className="listening-indicator"><span className="listening-dot" /><span>Listening...</span></div>}
-      <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} onChange={handleFileChange} />
     </div>
   );
 };
@@ -1129,7 +1222,7 @@ const SplitTextIntro: FC<{ onDone: () => void }> = ({ onDone }) => {
 // ── Root App ──
 export default function NEXUS({ introReady }: { introReady?: boolean }) {
   const [collapsed, setCollapsed] = useState<boolean>(false);
-  
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState<string>("");
   const [isTyping, setIsTyping] = useState<boolean>(false);
@@ -1138,13 +1231,13 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
   const [authMode, setAuthMode] = useState<string>("login");
   const [historyItems, setHistoryItems] = useState<HistoryItem[]>([]);
   const [copyShow, setCopyShow] = useState<boolean>(false);
-  const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [showIntroText, setShowIntroText] = useState<boolean>(true);
   const [welcomeRevealed, setWelcomeRevealed] = useState<boolean>(false);
   const [isListening, setIsListening] = useState<boolean>(false);
   const [speechSupported, setSpeechSupported] = useState<boolean>(false);
   const [typewriterText, setTypewriterText] = useState<string>("");
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -1274,26 +1367,10 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     copyTimer.current = setTimeout(() => setCopyShow(false), 1800);
   }, []);
 
-  const handleFilesAttach = useCallback((files: File[]): void => {
-    const toAdd = files.slice(0, 10 - attachedFiles.length);
-    toAdd.forEach(file => {
-      const type = getFileType(file);
-      const af = { id: Date.now() + Math.random() + "", file, type };
-      if (type === "image") {
-        const reader = new FileReader();
-        reader.onload = (e: ProgressEvent<FileReader>) => { setAttachedFiles(prev => prev.map(x => x.id === af.id ? { ...x, preview: e.target?.result as string } : x)); };
-        reader.readAsDataURL(file);
-      }
-      setAttachedFiles(prev => [...prev, af]);
-    });
-  }, [attachedFiles.length]);
 
-  const handleRemoveAttach = useCallback((id: string): void => {
-    setAttachedFiles(prev => prev.filter(f => f.id !== id));
-  }, []);
 
   const handleSuggestion = (text: string): void => {
-    
+
     sendMessage(text);
   };
 
@@ -1309,6 +1386,142 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     setIsTyping(false);
   }, []);
 
+  const handleGenerateReport = useCallback((): void => {
+    if (messages.length === 0) return;
+    const now = new Date();
+    const sessionTitle = historyItems.find((h) => h.id === activeHist)?.title || "InsightX Chat Report";
+    const safeTitle = sessionTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "insightx-chat-report";
+
+    const userMessages = messages.filter((m) => m.role === "user" && m.text.trim());
+    const aiMessages = messages.filter((m) => m.role === "ai" && !m.isError && m.text.trim());
+
+    const stripMarkdown = (text: string): string =>
+      text
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/\*([^*]+)\*/g, "$1")
+        .replace(/#+\s/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const escapeHtml = (value: string): string =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const splitSentences = (text: string): string[] =>
+      stripMarkdown(text)
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 20);
+
+    const aiCorpus = aiMessages.map((m) => stripMarkdown(m.text)).join(" ");
+    const latestAiText = aiMessages.length > 0 ? stripMarkdown(aiMessages[aiMessages.length - 1].text) : "";
+
+    const executiveSummary = ((): string[] => {
+      const preferred = splitSentences(latestAiText);
+      if (preferred.length >= 2) return preferred.slice(0, 3);
+      const fallback = splitSentences(aiCorpus);
+      if (fallback.length > 0) return fallback.slice(0, 3);
+      const userFallback = userMessages.length > 0 ? stripMarkdown(userMessages[userMessages.length - 1].text) : "No analytical conversation available.";
+      return [userFallback];
+    })();
+
+    const keyFindings = ((): string[] => {
+      const pool = splitSentences(aiCorpus);
+      const picked = pool.filter((s) => /(₹|rs|inr|%|\d)/i.test(s)).slice(0, 6);
+      if (picked.length > 0) return Array.from(new Set(picked)).slice(0, 6);
+      return pool.slice(0, 5);
+    })();
+
+    const recommendations = ((): string[] => {
+      const pool = splitSentences(aiCorpus);
+      const picked = pool.filter((s) => /(recommend|next|should|consider|follow-up|analy[sz]e|check|monitor|investigate)/i.test(s)).slice(0, 5);
+      if (picked.length > 0) return Array.from(new Set(picked)).slice(0, 5);
+      const joinedQueries = userMessages.map((m) => m.text.toLowerCase()).join(" ");
+      const fallback: string[] = [];
+      if (joinedQueries.includes("fraud")) fallback.push("Run a category-wise and bank-wise fraud deep-dive to isolate concentration risk.");
+      if (joinedQueries.includes("failure")) fallback.push("Track hourly failure rates by channel and bank to identify repeat outage windows.");
+      if (joinedQueries.includes("revenue")) fallback.push("Track weekly and monthly revenue trend with baseline vs projection variance.");
+      if (fallback.length === 0) fallback.push("Validate key metrics with segmented breakdowns before final business decision.");
+      return fallback.slice(0, 5);
+    })();
+
+    const scopeQuestions = userMessages.map((m) => stripMarkdown(m.text)).filter(Boolean).slice(-6);
+
+    const chartPoints = Array.from(
+      new Map(
+        messages
+          .flatMap((m) => (m.chartData || []).map((d) => [`${d.label}`, d.value] as const))
+          .reverse()
+      ).entries()
+    )
+      .map(([label, value]) => ({ label, value }))
+      .slice(0, 10);
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(sessionTitle)}</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; margin: 28px; color: #111827; line-height: 1.5; }
+    h1 { font-size: 24px; margin: 0 0 6px 0; }
+    h2 { font-size: 16px; margin: 22px 0 8px 0; color: #1f2937; }
+    p, li { font-size: 11pt; }
+    .meta { color: #4b5563; font-size: 10pt; margin-bottom: 12px; }
+    .section { margin-bottom: 6px; }
+    .box { border: 1px solid #d1d5db; padding: 10px 12px; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; font-size: 10.5pt; }
+    th { background: #f3f4f6; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(sessionTitle)}</h1>
+  <div class="meta">Generated: ${escapeHtml(now.toLocaleString())} | Messages analyzed: ${messages.length}</div>
+
+  <h2>Executive Summary</h2>
+  <div class="box">
+    <ul>${executiveSummary.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+  </div>
+
+  <h2>Key Findings</h2>
+  <ul>${(keyFindings.length ? keyFindings : ["No strong findings were extracted from the current conversation."]).map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+
+  <h2>Recommendations</h2>
+  <ul>${recommendations.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+
+  <h2>Conversation Scope</h2>
+  <ul>${(scopeQuestions.length ? scopeQuestions : ["No user questions captured."]).map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ul>
+
+  <h2>Referenced Data Points</h2>
+  ${chartPoints.length ? `
+    <table>
+      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+      <tbody>
+        ${chartPoints.map((d) => `<tr><td>${escapeHtml(d.label)}</td><td>${escapeHtml(String(d.value))}</td></tr>`).join("")}
+      </tbody>
+    </table>
+  ` : "<p>No structured chart data detected in this conversation.</p>"}
+</body>
+</html>`;
+
+    const blob = new Blob([`\ufeff${html}`], { type: "application/msword;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeTitle}-${now.toISOString().slice(0, 10)}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [messages, historyItems, activeHist]);
+
   // ── Load a specific session by id ──
   const loadSessionById = async (sessionId: string) => {
     try {
@@ -1318,8 +1531,6 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
       if (session && session.messages) {
         setMessages(session.messages);
         setActiveHist(sessionId);
-        setAttachedFiles([]);
-        
       }
     } catch (error) {
       console.error("Failed to load session:", error);
@@ -1327,9 +1538,13 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
   };
 
   // ── Delete a session by id ──
-  const handleDeleteSession = async (sessionId: string) => {
-    const ok = window.confirm("Delete this chat permanently? This cannot be undone.");
-    if (!ok) return;
+  const handleDeleteSession = (sessionId: string) => {
+    setDeleteConfirmId(sessionId);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmId) return;
+    const sessionId = deleteConfirmId;
     try {
       await indexdbService.deleteSession(sessionId);
       const remaining = historyItems.filter((h) => h.id !== sessionId);
@@ -1340,35 +1555,30 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
         if (nextSession) {
           await loadSessionById(nextSession.id);
         } else {
-          const newSessionId = await indexdbService.createNewSession();
-          currentSessionIdRef.current = newSessionId;
           setMessages([]);
           setActiveHist(null);
-          setAttachedFiles([]);
-          
         }
       }
+      setDeleteConfirmId(null);
     } catch (error) {
       console.error("Failed to delete session:", error);
+      setDeleteConfirmId(null);
     }
   };
 
   const sendMessage = async (text: string): Promise<void> => {
-    const hasAtt = attachedFiles.length > 0;
-    if ((!text.trim() && !hasAtt) || isTyping) return;
-    const attachmentMeta = attachedFiles.map((af: FileAttachment) => ({ name: af.file.name, type: af.type, preview: af.preview }));
-    const displayText = text.trim() || `[Attached ${attachedFiles.length} file${attachedFiles.length > 1 ? "s" : ""}]`;
-    const userMsg: Message = { id: Date.now() + "u", role: "user", text: displayText, timestamp: new Date(), attachments: attachmentMeta.length > 0 ? attachmentMeta : undefined };
+    if (!text.trim() || isTyping) return;
+    const displayText = text.trim();
+    const userMsg: Message = { id: Date.now() + "u", role: "user", text: displayText, timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
 
     // Save user message to IndexDB
     await indexdbService.saveMessage(userMsg);
 
     setInput("");
-    setAttachedFiles([]);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     setIsTyping(true);
-    
+
     try {
       const abortController = new AbortController();
       abortControllerRef.current = abortController;
@@ -1440,8 +1650,6 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     currentSessionIdRef.current = newSessionId;
     setMessages([]);
     setActiveHist(null);
-    setAttachedFiles([]);
-    
   };
 
   const handleIntroDone = useCallback(() => {
@@ -1455,10 +1663,11 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
       <CopyToast show={copyShow} />
       {lightboxSrc && (
         <div className="lightbox-overlay" onClick={() => setLightboxSrc(null)}>
-          <button className="lightbox-close">✕</button>
-          <img className="lightbox-img" src={lightboxSrc} alt="Full size" onClick={e => e.stopPropagation()} />
+          <button className="lightbox-close" onClick={() => setLightboxSrc(null)}>✕</button>
+          <img className="lightbox-img" src={lightboxSrc} alt="Enlarged" onClick={e => e.stopPropagation()} />
         </div>
       )}
+      {deleteConfirmId && <DeleteConfirmModal onConfirm={handleConfirmDelete} onCancel={() => setDeleteConfirmId(null)} />}
       <div className="app">
         <Sidebar
           collapsed={collapsed}
@@ -1491,12 +1700,12 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
                   </div>
                 )}
                 <InputBar
-                  input={input} isTyping={isTyping} attachedFiles={attachedFiles}
+                  input={input} isTyping={isTyping}
                   onChange={(e: ChangeEvent<HTMLTextAreaElement>) => { setInput(e.target.value); autoResize(); }}
                   onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
                   onSend={() => sendMessage(input)} onStop={handleStop}
+                  onGenerateReport={handleGenerateReport} canGenerateReport={messages.length > 0 && !isTyping}
                   onVoiceToggle={handleVoiceToggle} isListening={isListening} speechSupported={speechSupported}
-                  onFilesAttach={handleFilesAttach} onRemoveAttach={handleRemoveAttach}
                   textareaRef={textareaRef as React.RefObject<HTMLTextAreaElement>}
                   typewriterText={typewriterText}
                 />
