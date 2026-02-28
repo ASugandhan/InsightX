@@ -7,7 +7,8 @@ import re
 import time
 import hashlib
 from collections import defaultdict
-from typing import Tuple
+from typing import Tuple, List, Dict
+from content_warnings import ContentWarningDetector
 
 
 # ============================================================================
@@ -76,6 +77,7 @@ class InputGuardrail:
     def __init__(self):
         self.injection_patterns = [re.compile(p, re.IGNORECASE | re.DOTALL) for p in INJECTION_PATTERNS]
         self.off_topic_patterns = [re.compile(p, re.IGNORECASE) for p in OFF_TOPIC_PATTERNS]
+        self.warning_detector = ContentWarningDetector()
 
     def validate(self, question: str) -> Tuple[bool, str]:
         """
@@ -115,6 +117,23 @@ class InputGuardrail:
         # Truncate if somehow too long after cleaning
         return q[:MAX_QUESTION_LENGTH]
 
+    def check_warnings(self, question: str) -> Tuple[bool, List[Dict]]:
+        """
+        Check for content warnings in the question.
+        
+        Returns:
+            (has_warnings, warnings_list)
+        """
+        has_warnings, warnings = self.warning_detector.detect(question)
+        return has_warnings, warnings
+
+    def should_block_due_to_warnings(self, warnings: List[Dict]) -> bool:
+        """Check if request should be blocked due to critical warnings."""
+        return self.warning_detector.should_block_request(warnings)
+
+    def format_warnings(self, warnings: List[Dict]) -> str:
+        """Format warnings for user response."""
+        return self.warning_detector.format_warnings_for_response(warnings)
 
 class OutputGuardrail:
     """Validates and sanitizes LLM output before returning to user."""
@@ -228,3 +247,19 @@ class Guardrails:
             return msg
         return sanitized
 
+    def check_content_warnings(self, question: str) -> Tuple[bool, List[Dict]]:
+        """
+        Check for content warnings (out-of-context, restricted, explicit, etc).
+        
+        Returns:
+            (has_warnings, warnings_list)
+        """
+        return self.input_guard.check_warnings(question)
+
+    def should_block_request_due_to_warnings(self, warnings: List[Dict]) -> bool:
+        """Check if request should be blocked based on critical warnings."""
+        return self.input_guard.should_block_due_to_warnings(warnings)
+
+    def get_formatted_warnings(self, warnings: List[Dict]) -> str:
+        """Get formatted warning message for user."""
+        return self.input_guard.format_warnings(warnings)
