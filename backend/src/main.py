@@ -1,223 +1,291 @@
-﻿import sys
+﻿"""
+InsightX System - Full Dynamic Pipeline v2.1
+Fixes applied:
+  Issue 1: Anti-hallucination via SchemaValidator
+  Issue 2: Conversation history for follow-up context
+  Issue 3: Smart defaults + query clarification for vague queries
+  Issue 4: Robust SQL auto-fix with SQLFixer
+  Task 3:  Guardrails on all input/output/SQL
+"""
+
+import sys
+import time
+import pandas as pd
+
 sys.path.append('src')
 
-from typing import List
-import pandas as pd
 from analytics.engine import AnalyticsEngine
-from analytics.sql_generator import SQLGenerator
-from nlp.conversation_manager import ConversationManager
-from explainability.formatter import ResponseFormatter
-
-from validation.result_validator import ResultValidator
-from explainability.formatter import ResponseFormatter
-from explainability.confidence_calibrator import ConfidenceCalibrator
-import time
+from analytics.intelligence_layer import IntelligenceLayer
+from nlp.gemini_nlu import GeminiNLU
+from nlp.schema_validator import SchemaValidator
+from nlp.query_clarifier import QueryClarifier
+from nlp.sql_fixer import SQLFixer
+from explainability.gemini_formatter import GeminiResponseFormatter
+from rag.financial_knowledge_rag import FinancialKnowledgeRAG
+from guardrails import Guardrails
 
 
 class InsightXSystem:
-    def __init__(self, csv_path):
+    def __init__(self, csv_path: str):
         print("\n" + "="*60)
-        print("INITIALIZING INSIGHTX SYSTEM")
+        print("  INSIGHTX - INTELLIGENT UPI ANALYTICS v2.1")
         print("="*60)
-        
+
         self.analytics = AnalyticsEngine(csv_path)
-        self.sql_generator = SQLGenerator()
-        self.conversation_manager = ConversationManager()
-        self.formatter = ResponseFormatter()
-        
-        # Track current session
-        self.current_session = None
-        self._last_caveats = ""
-        
-        # Validation and confidence components
-        self.result_validator = ResultValidator()
-        self.confidence_calibrator = ConfidenceCalibrator() 
+        rag_dir = csv_path.replace('upi_transactions_2024.csv', 'financial_rag_db')
+        self.rag = FinancialKnowledgeRAG(persist_directory=rag_dir)
+        self.nlu = GeminiNLU()
+        self.intelligence = IntelligenceLayer(self.analytics.precomputed)
+        self.formatter = GeminiResponseFormatter()
 
-        print("\nâœ“ All components initialized!")
-        print("="*60)
-    
-    def ask(self, question: str, show_tier2: bool = False, show_tier3: bool = False):
-        """
-        Main entry point with full explainability
-        
-        Args:
-            question: User's question
-            show_tier2: Show detailed explanation
-            show_tier3: Show technical details
-        """
-        
-        print(f"\nðŸ“ Question: {question}")
-        
-        # Process with conversation context
-        enhanced, self.current_session = self.conversation_manager.process_query(
-            question,
-            self.current_session
-        )
-        
-        # Show context
-        context = self.conversation_manager.get_context_summary(self.current_session)
-        if context != "No active context":
-            print(f"ðŸ”— Context: {context}")
-        
-        print(f"âœ“ Parsed (confidence: {enhanced.confidence:.2f})")
-        
-        # Generate SQL
-        sql = self.sql_generator.generate(enhanced)
-        print(f"âœ“ Generated SQL")
-        
-        # Execute query with timing
-        start_time = time.time()
-        result = self.analytics.query(sql)
-        execution_time_ms = (time.time() - start_time) * 1000
-        print(f"âœ“ Query executed ({len(result)} rows, {execution_time_ms:.1f}ms)")
-        
-        # ✅ VALIDATION: Validate result quality
-        validation = self.result_validator.validate(result, enhanced.metrics, enhanced.filters)
-        
-        # ✅ VALIDATION: Adjust confidence based on validation
-        if not validation['is_valid']:
-            enhanced.confidence = max(0.5, enhanced.confidence + validation['confidence_adjustment'])
-        
-        # ✅ VALIDATION: Get actual sample size for confidence calibration
-        sample_size = len(result) if not result.empty else 0
-        result_quality = self.confidence_calibrator.assess_result_quality(result, sample_size)
-        
-        # ✅ VALIDATION: Final confidence calibration
-        complexity = self.confidence_calibrator.assess_query_complexity(enhanced)
-        rag_boost = 0.0  # Already applied in parser
-        enhanced.confidence, confidence_label = self.confidence_calibrator.calibrate(
-            enhanced.confidence, complexity, rag_boost, result_quality
-        )
+        # Issue 1: Schema validation (anti-hallucination)
+        self.schema_validator = SchemaValidator()
 
-        
-        # Get baseline for comparison
-        baseline = self._get_baseline(enhanced.metrics)
-        
-        # Format response with full explainability
-        response = self.formatter.format(
-            query=question,
-            result=result,
-            confidence=enhanced.confidence,
-            sql=sql,
-            filters=enhanced.filters,
-            metrics=enhanced.metrics,
-            execution_time_ms=execution_time_ms,
-            baseline=baseline,
-            analytics_engine=self.analytics
-        )
-        
-        print(f"âœ“ Response formatted")
-        
-        # Display Tier 1 (always)
+        # Issue 3: Query clarifier (vague query handling)
+        self.query_clarifier = QueryClarifier()
+
+        # Issue 4: Robust SQL fixer
+        self.sql_fixer = SQLFixer()
+
+        # Task 3: Guardrails
+        self.guardrails = Guardrails(rate_limit_per_minute=30)
+
+        # Issue 2: Conversation memory
+        self.conversation_history = []
+
+        print("\n InsightX v2.1 ready! All fixes + guardrails active.")
+        print("="*60 + "\n")
+
+    def ask(self, question: str, session_id: str = "default", stop_event=None) -> dict:
+        """
+        Main entry point with all fixes + guardrails applied.
+        """
+        def check_stop():
+            if stop_event and stop_event.is_set():
+                print("  [ABORTED] Query processing stopped due to client disconnect.")
+                raise Exception("ClientDisconnected")
         print(f"\n{'='*60}")
-        print(f"ANSWER")
-        print(f"{'='*60}")
-        print(response.tier1_text)
-        print(f"\nConfidence: {response.confidence}")
-        print(f"Sample Size: {response.sample_size:,} records")
-        
-        # Display context comparison
-        if response.context_comparison and "No baseline" not in response.context_comparison:
-            print(f"\n{response.context_comparison}")
-        
-        # Display caveats
-        if (
-            response.caveats
-            and "No significant" not in response.caveats
-            and response.caveats != self._last_caveats
-        ):
-            print(f"\n{response.caveats}")
-            self._last_caveats = response.caveats
-        
-        # Display hypotheses if relevant
-        if "why" in question.lower() and response.hypotheses and "No specific" not in response.hypotheses:
-            print(f"\n{response.hypotheses}")
-            return response
-        
-        print(f"{'='*60}")
-        
-        # Show Tier 2 if requested
-        if show_tier2:
-            print(f"\n{'='*60}")
-            print(f"DETAILED EXPLANATION (Tier 2)")
-            print(f"{'='*60}")
-            print(response.tier2_details)
+        print(f"Q: {question}")
+        start_total = time.time()
+
+        # ----------------------------------------------------------------
+        # GUARDRAIL: Validate input (rate limit + content)
+        # ----------------------------------------------------------------
+        is_safe, rejection_msg = self.guardrails.check_input(question, session_id)
+        if not is_safe:
+            print(f"  BLOCKED: {rejection_msg}")
+            return self._blocked_response(question, rejection_msg)
+
+        check_stop()
+
+        # Sanitize input
+        question = self.guardrails.sanitize_input(question)
+
+        # ----------------------------------------------------------------
+        # ISSUE 3: Check for vague/ambiguous queries first
+        # ----------------------------------------------------------------
+        clarifier_result = self.query_clarifier.analyze(question)
+
+        if clarifier_result["is_ambiguous"] and clarifier_result["clarification_needed"]:
+            # Return clarification question without calling Gemini
+            clarification = clarifier_result["clarification_needed"]
+            print(f"  Ambiguous query - requesting clarification")
+            self.conversation_history.append({"role": "user", "content": question})
+            self.conversation_history.append({"role": "assistant", "content": clarification})
+            return {
+                "answer": clarification,
+                "sql": "", "result": pd.DataFrame(),
+                "execution_ms": 0, "total_ms": 0,
+                "insights": [], "anomalies": [], "proactive_tips": [],
+                "benchmark_comparison": "", "rag_context_used": False,
+                "row_count": 0, "intent": "clarification_needed",
+                "entities": [], "is_followup": False,
+                "needs_clarification": True
+            }
+
+        # ----------------------------------------------------------------
+        # STEP 1: RAG - Financial domain knowledge
+        # ----------------------------------------------------------------
+        rag_context = ""
+        check_stop()
+        if self.rag.should_use_rag(question):
+            print("  Retrieving financial domain knowledge...")
+            rag_context = self.rag.retrieve(question, n_results=3)
+            if rag_context:
+                print(f"  Found relevant domain knowledge")
+
+        # ----------------------------------------------------------------
+        # ISSUE 2 + STEP 2: Gemini NLU with conversation history
+        # ----------------------------------------------------------------
+        check_stop()
+        print("  Understanding question & generating SQL...")
+
+        # Use smart default SQL if available (Issue 3)
+        if clarifier_result["has_smart_default"]:
+            sql = clarifier_result["smart_default_sql"]
+            intent = clarifier_result["smart_default_intent"]
+            entities = []
+            is_followup = False
+            print(f"  Using smart default SQL for vague query")
         else:
-            print(f"\nðŸ’¡ Tip: Add show_tier2=True to see detailed explanation")
-        
-        # Show Tier 3 if requested
-        if show_tier3:
-            print(f"\n{'='*60}")
-            print(f"TECHNICAL DETAILS (Tier 3)")
-            print(f"{'='*60}")
-            print(response.tier3_technical)
-        else:
-            print(f"ðŸ’¡ Tip: Add show_tier3=True to see SQL and technical details")
-        
-        return response
-    
-    def _get_baseline(self, metrics: List[str]) -> pd.DataFrame:
-        """Get baseline data for comparison"""
-        
-        if not metrics:
-            return None
-        
-        # Use precomputed overall stats as baseline
-        overall = self.analytics.get_precomputed('overall')
-        
-        if overall:
-            import pandas as pd
-            baseline_data = {}
-            
-            for metric in metrics:
-                if metric == 'avg_amount':
-                    baseline_data['avg_amount'] = overall['avg_amount']
-                elif metric == 'success_rate':
-                    baseline_data['success_rate'] = overall['success_rate']
-                elif metric == 'failure_rate':
-                    baseline_data['failure_rate'] = overall['failure_rate']
-                elif metric == 'fraud_flag_rate':
-                    baseline_data['fraud_flag_rate'] = overall['fraud_flag_rate']
-            
-            if baseline_data:
-                return pd.DataFrame([baseline_data])
-        
-        return None
-    
+            nlu_result = self.nlu.understand(
+                question=question,
+                conversation_history=self.conversation_history,  # Issue 2
+                rag_context=rag_context,
+                stop_event=stop_event
+            )
+            sql = nlu_result.get("sql", "")
+            intent = nlu_result.get("intent", question)
+            entities = nlu_result.get("entities", [])
+            is_followup = nlu_result.get("is_followup", False)
+
+        # Apply temporal rewrite if detected (Issue 3)
+        if clarifier_result.get("temporal_filter") and sql:
+            sql = self.query_clarifier.apply_temporal_rewrite(sql, clarifier_result["temporal_filter"])
+
+        print(f"  Intent: {intent}")
+        print(f"  SQL: {sql[:120]}{'...' if len(sql) > 120 else ''}")
+
+        # ----------------------------------------------------------------
+        # ISSUE 1: Validate SQL for hallucinations
+        # ----------------------------------------------------------------
+        check_stop()
+        sql_validation = self.schema_validator.validate_sql(sql)
+        if not sql_validation["is_valid"]:
+            print(f"  HALLUCINATION DETECTED: {sql_validation['issues']}")
+            # Try to fix with Gemini
+            sql = self.sql_fixer.fix(question, sql, str(sql_validation["issues"]), stop_event=stop_event)
+            print(f"  Fixed SQL: {sql[:100]}...")
+
+        # ----------------------------------------------------------------
+        # GUARDRAIL: Validate SQL safety before execution
+        # ----------------------------------------------------------------
+        sql_safe, sql_msg = self.guardrails.check_sql(sql)
+        if not sql_safe:
+            print(f"  UNSAFE SQL blocked: {sql_msg}")
+            sql = "SELECT COUNT(*) as total_transactions, ROUND(AVG(amount_inr),2) as avg_amount FROM transactions"
+
+        # ----------------------------------------------------------------
+        # STEP 3: DuckDB - Execute on full 250,000 rows
+        # ----------------------------------------------------------------
+        check_stop()
+        print("  Querying full 250,000 row dataset...")
+        start_query = time.time()
+        result = self._execute_sql_safely(question, sql, stop_event=stop_event)
+        exec_ms = (time.time() - start_query) * 1000
+        print(f"  {len(result)} result rows in {exec_ms:.1f}ms")
+
+        # ----------------------------------------------------------------
+        # STEP 4: Intelligence Layer
+        # ----------------------------------------------------------------
+        check_stop()
+        print("  Running intelligence analysis...")
+        intelligence = self.intelligence.analyze(result, intent, sql)
+
+        # ----------------------------------------------------------------
+        # STEP 5: Gemini Formatter
+        # ----------------------------------------------------------------
+        check_stop()
+        print("  Generating natural language answer...")
+        raw_answer = self.formatter.format(
+            question=question, result=result, intent=intent,
+            intelligence=intelligence, rag_context=rag_context,
+            stop_event=stop_event
+        )
+
+        # ----------------------------------------------------------------
+        # GUARDRAIL: Sanitize output
+        # ----------------------------------------------------------------
+        check_stop()
+        answer = self.guardrails.check_output(raw_answer)
+
+        total_ms = (time.time() - start_total) * 1000
+        print(f"  Done in {total_ms:.0f}ms total\n")
+        print(f"Answer: {answer}")
+        print("="*60)
+
+        # ----------------------------------------------------------------
+        # ISSUE 2: Update conversation history
+        # ----------------------------------------------------------------
+        self.conversation_history.append({"role": "user", "content": question})
+        self.conversation_history.append({"role": "assistant", "content": answer})
+        if len(self.conversation_history) > 20:
+            self.conversation_history = self.conversation_history[-20:]
+
+        return {
+            "answer": answer, "sql": sql, "result": result,
+            "execution_ms": exec_ms, "total_ms": total_ms,
+            "insights": intelligence.get("insights", []),
+            "anomalies": intelligence.get("anomalies", []),
+            "proactive_tips": intelligence.get("proactive_tips", []),
+            "benchmark_comparison": intelligence.get("benchmark_comparison", ""),
+            "rag_context_used": bool(rag_context),
+            "row_count": len(result), "intent": intent,
+            "entities": entities, "is_followup": is_followup,
+            "needs_clarification": False
+        }
+
+    def _execute_sql_safely(self, question: str, sql: str, stop_event=None) -> pd.DataFrame:
+        """Execute SQL with Issue 4 fix: robust auto-correction."""
+        try:
+            return self.analytics.query(sql)
+        except Exception as e:
+            print(f"  SQL error: {e}. Auto-fixing...")
+            try:
+                fixed_sql = self.sql_fixer.fix(question, sql, str(e), stop_event=stop_event)
+                # Validate fixed SQL is safe before executing
+                safe, msg = self.guardrails.check_sql(fixed_sql)
+                if not safe:
+                    print(f"  Fixed SQL also unsafe: {msg}")
+                    return pd.DataFrame()
+                return self.analytics.query(fixed_sql)
+            except Exception as e2:
+                print(f"  Fix also failed: {e2}")
+                return pd.DataFrame()
+
+    def _blocked_response(self, question: str, reason: str) -> dict:
+        return {
+            "answer": reason, "sql": "", "result": pd.DataFrame(),
+            "execution_ms": 0, "total_ms": 0, "insights": [],
+            "anomalies": [], "proactive_tips": [], "benchmark_comparison": "",
+            "rag_context_used": False, "row_count": 0,
+            "intent": "blocked", "entities": [], "is_followup": False,
+            "needs_clarification": False, "blocked": True
+        }
+
     def start_fresh(self):
-        """Start a fresh conversation"""
-        if self.current_session:
-            self.conversation_manager.clear_context(self.current_session)
-            print("âœ“ Context cleared - starting fresh!")
+        """Clear conversation history."""
+        self.conversation_history = []
+        print("Started fresh conversation")
+
+    def get_overview(self) -> dict:
+        overall = self.analytics.precomputed.get('overall', {})
+        by_type = self.analytics.precomputed.get('by_type', [])
+        by_device = self.analytics.precomputed.get('by_device', [])
+        return {
+            "overall": overall, "by_type": by_type, "by_device": by_device,
+            "summary": (
+                f"250,000 UPI transactions | "
+                f"Rs{overall.get('avg_amount', 0):,.0f} avg amount | "
+                f"{overall.get('success_rate', 0):.1f}% success rate | "
+                f"{overall.get('failure_rate', 0):.1f}% failure rate | "
+                f"{overall.get('fraud_flag_rate', 0):.2f}% fraud rate"
+            )
+        }
 
 
-# ============================================================================
-# DEMO
-# ============================================================================
 if __name__ == "__main__":
     system = InsightXSystem('../data/upi_transactions_2024.csv')
-    
-    print("\n\n" + "="*60)
-    print("DAY 4 DEMO: FULL EXPLAINABILITY")
-    print("="*60)
-    
-    # Demo 1: Basic query with all tiers
-    print("\nðŸ“Œ DEMO 1: Basic Query")
-    print("-" * 60)
-    system.ask("What is the average P2M transaction amount?", show_tier2=True, show_tier3=True)
-    
-    # Demo 2: Why question with hypotheses
-    print("\n\nðŸ“Œ DEMO 2: 'Why' Question")
-    print("-" * 60)
-    system.ask("Why is the P2M amount higher?")
-    
-    # Demo 3: Multi-turn with context
-    print("\n\nðŸ“Œ DEMO 3: Multi-turn Conversation")
-    print("-" * 60)
-    system.ask("Show me P2P transactions")
-    system.ask("What about weekends?")
-    system.ask("Why might weekend transactions differ?")
-    
-    print("\n" + "="*60)
-    print("âœ“ DAY 4 DEMO COMPLETE!")
-    print("="*60)
+    overview = system.get_overview()
+    print("\nDataset:", overview["summary"])
+
+    questions = [
+        "How many total transactions are there?",
+        "What is the failure rate for P2P transactions above 5000 rupees?",
+        "Which device type has the highest failure rate?",
+        "Why might weekends have more failures?",
+        "Show fraud trends by age group",
+        "What about by state?",
+    ]
+    for q in questions:
+        system.ask(q)

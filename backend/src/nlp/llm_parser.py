@@ -1,415 +1,194 @@
 ﻿"""
-LLM-based Query Parser using Gemini API (NEW SDK)
-Falls back to rule-based parser if LLM fails
-CLEAN + FIXED VERSION
+LLM Parser - Compatibility wrapper + Issue 1 Fix (Anti-Hallucination)
+Wraps GeminiNLU and adds TWO-LAYER schema validation:
+  Layer 1: Question-level keyword scan (works even without Gemini/API)
+  Layer 2: SQL validation after Gemini generates SQL
+Used by test_anti_hallucination.py test suite.
 """
 
-import os
-import json
-import re
-from enum import Enum
-from typing import List, Dict
-from dataclasses import dataclass
-from nlp.parser import QueryIntent
+import sys, os, re
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from google import genai
-from dotenv import load_dotenv
+from nlp.gemini_nlu import GeminiNLU
+from nlp.schema_validator import SchemaValidator, HALLUCINATED_COLUMNS, VALID_COLUMNS
 
 
-from nlp.schema_validator import SchemaValidator
-from nlp.query_clarifier import QueryClarifier
-from nlp.temporal_parser import TemporalParser
-from nlp.context_defaults import ContextDefaults
-from rag.query_rewriter import QueryRewriter
-from explainability.confidence_calibrator import ConfidenceCalibrator
-try:
-    from rag.query_enhancer import QueryEnhancer
-    RAG_AVAILABLE = True
-except Exception as e:
-    RAG_AVAILABLE = False
-# -----------------------------------------------------------------------------
-# ENV SETUP
-# -----------------------------------------------------------------------------
-load_dotenv()
+# Concept-to-hallucinated-column mapping — catches bad queries at question level
+QUESTION_HALLUCINATION_MAP = {
+    "revenue":              "revenue (use amount_inr instead)",
+    "revenues":             "revenue (use amount_inr instead)",
+    "profit":               "profit (not in schema)",
+    "profits":              "profit (not in schema)",
+    "profit margin":        "profit_margin (not in schema)",
+    "profit margins":       "profit_margin (not in schema)",
+    "conversion rate":      "conversion_rate (not in schema)",
+    "conversion rates":     "conversion_rate (not in schema)",
+    "customer segment":     "customer_segment (not in schema)",
+    "customer segments":    "customer_segment (not in schema)",
+    "user segment":         "customer_segment (not in schema)",
+    "user segments":        "customer_segment (not in schema)",
+    "region":               "region (use sender_state instead)",
+    "regions":              "region (use sender_state instead)",
+    "country":              "country (use sender_state instead)",
+    "countries":            "country (use sender_state instead)",
+    "city":                 "city (use sender_state instead)",
+    "cities":               "city (use sender_state instead)",
+    "visa":                 "Visa card type (not in schema - only P2P/P2M)",
+    "mastercard":           "Mastercard (not in schema)",
+    "card type":            "card_type (not in schema)",
+    "card types":           "card_type (not in schema)",
+    "gender":               "gender (not in schema)",
+    "income":               "income (not in schema)",
+    "salary":               "salary (not in schema)",
+    "salaries":             "salary (not in schema)",
+    "email":                "email (not in schema)",
+    "phone number":         "phone (not in schema)",
+    "phone numbers":        "phone (not in schema)",
+    "ltv":                  "ltv (not in schema)",
+    "roi":                  "roi (not in schema)",
+    "click rate":           "click_rate (not in schema)",
+    "click rates":          "click_rate (not in schema)",
+    "bounce rate":          "bounce_rate (not in schema)",
+    "bounce rates":         "bounce_rate (not in schema)",
+    "churn":                "churn_rate (not in schema)",
+    "churn rate":           "churn_rate (not in schema)",
+    "market share":         "market_share (not in schema)",
+    "refund":               "refund (not in schema)",
+    "refunds":              "refund (not in schema)",
+    "rating":               "rating (not in schema)",
+    "ratings":              "rating (not in schema)",
+    "score":                "score (not in schema - use fraud_flag)",
+    "credit score":         "credit_score (not in schema)",
+}
 
-# -----------------------------------------------------------------------------
-# DATA STRUCTURES
-# -----------------------------------------------------------------------------
 
-@dataclass
 class ParsedQuery:
-    intent: QueryIntent
-    metrics: List[str]
-    dimensions: List[str]
-    filters: Dict
-    original_query: str
-    confidence: float = 0.9
+    def __init__(self, intent, sql, confidence, entities,
+                 is_followup=False, is_valid=True, issues=None):
+        self.intent = intent
+        self.sql = sql
+        self.confidence = confidence
+        self.entities = entities
+        self.is_followup = is_followup
+        self.is_valid = is_valid
+        self.issues = issues or []
 
+    def __repr__(self):
+        return (f"ParsedQuery(intent='{self.intent}', "
+                f"confidence={self.confidence:.2f}, valid={self.is_valid})")
 
-# -----------------------------------------------------------------------------
-# RULE-BASED FALLBACK PARSER
-# -----------------------------------------------------------------------------
-
-class QueryParser:
-    """Deterministic rule-based parser"""
-
-    def parse(self, query: str) -> ParsedQuery:
-        q = query.lower()
-
-        intent = QueryIntent.DESCRIPTIVE
-        metrics, dimensions, filters = [], [], {}
-
-        # ---- Intent ----
-        if any(w in q for w in ["compare", "difference", "which is higher"]):
-            intent = QueryIntent.COMPARATIVE
-        elif any(w in q for w in ["trend", "over time", "peak", "by hour"]):
-            intent = QueryIntent.TEMPORAL
-        elif any(w in q for w in ["break down", "group by"]):
-            intent = QueryIntent.SEGMENTATION
-        elif "fraud" in q:
-            intent = QueryIntent.RISK
-
-        # ---- Metrics ----
-        if "average" in q or "avg" in q:
-            metrics.append("avg_amount")
-        if "total" in q or "volume" in q:
-            metrics.append("total_amount")
-        if "how many" in q or "count" in q:
-            metrics.append("count")
-        if "success rate" in q:
-            metrics.append("success_rate")
-            filters["transaction_status"] = "SUCCESS"
-        if "failure rate" in q:
-            metrics.append("failure_rate")
-            filters["transaction_status"] = "FAILED"
-        if "fraud" in q:
-            metrics.append("fraud_flag_rate")
-            filters["fraud_flag"] = 1
-
-        if not metrics:
-            metrics.append("count")
-
-        # ---- Dimensions ----
-        if "device" in q:
-            dimensions.append("device_type")
-        if "age group" in q:
-            dimensions.append("sender_age_group")
-        if "merchant" in q:
-            dimensions.append("merchant_category")
-        if "hour" in q or "time" in q:
-            dimensions.append("hour_of_day")
-        if "state" in q:
-            dimensions.append("sender_state")
-
-        # ---- Filters ----
-        if "p2p" in q:
-            filters["transaction_type"] = "P2P"
-        if "p2m" in q:
-            filters["transaction_type"] = "P2M"
-        if "weekend" in q:
-            filters["is_weekend"] = 1
-        if "android" in q:
-            filters["device_type"] = "Android"
-        if "ios" in q:
-            filters["device_type"] = "iOS"
-        if "food" in q:
-            filters["merchant_category"] = "Food"
-
-        age_match = re.search(r"(18-25|26-35|36-45|46-55|56\+)", q)
-        if age_match:
-            filters["sender_age_group"] = age_match.group(1)
-
-        # Amount filters: "above 5000", ">= 1000", "more than 500"
-        amount_gte = re.search(r"(?:above|over|more than|>=|greater than)\s*[\u20b9rs\.]*\s*(\d+)", q)
-        amount_lte = re.search(r"(?:below|under|less than|<=)\s*[\u20b9rs\.]*\s*(\d+)", q)
-        if amount_gte:
-            filters["amount_inr"] = {"gte": int(amount_gte.group(1))}
-        if amount_lte:
-            filters["amount_inr"] = {"lte": int(amount_lte.group(1))}
-
-        # Status filters
-        if "failed" in q and "transaction_status" not in filters:
-            filters["transaction_status"] = "FAILED"
-        if "success" in q and "successful" in q and "transaction_status" not in filters:
-            filters["transaction_status"] = "SUCCESS"
-
-        return ParsedQuery(
-            intent=intent,
-            metrics=metrics,
-            dimensions=dimensions,
-            filters=filters,
-            original_query=query,
-            confidence=0.6
-        )
-
-
-# -----------------------------------------------------------------------------
-# GEMINI LLM PARSER (NEW SDK) WITH FALLBACK
-# -----------------------------------------------------------------------------
 
 class LLMParser:
-    """LLM-powered query parser using NEW Gemini SDK"""
-
     def __init__(self):
-        self.api_key = os.getenv("GOOGLE_API_KEY")
+        self.nlu = GeminiNLU()
+        self.validator = SchemaValidator()
+        self._conversation_history = []
+        print("LLMParser initialized (GeminiNLU + SchemaValidator)")
 
-        if self.api_key:
-            self.client = genai.Client(api_key=self.api_key)
-            self.model = "models/gemini-flash-latest"
-            print("âœ“ LLM Parser initialized (Gemini Flash - NEW SDK)")
+    def _scan_question_for_hallucinations(self, question: str) -> list:
+        """
+        Layer 1: Scan the question TEXT for known hallucinated concepts.
+        This works independently of Gemini — catches bad intent before SQL is even generated.
+        """
+        q_lower = question.lower()
+        found = []
+        for concept, description in QUESTION_HALLUCINATION_MAP.items():
+            if re.search(r'\b' + re.escape(concept) + r'\b', q_lower):
+                found.append(description)
+        return found
+
+    def parse(self, question: str) -> ParsedQuery:
+        """
+        Parse a natural language question into a validated ParsedQuery.
+        Two-layer hallucination detection:
+          Layer 1 - question text scan (API-independent, always works)
+          Layer 2 - SQL output validation (catches anything Gemini hallucinates)
+        """
+        # ---- LAYER 1: Question-level scan ----
+        question_issues = self._scan_question_for_hallucinations(question)
+        question_has_hallucination = len(question_issues) > 0
+
+        # Call Gemini NLU (may fail/rate-limit, falls back internally)
+        try:
+            nlu_result = self.nlu.understand(
+                question=question,
+                conversation_history=self._conversation_history,
+                rag_context=""
+            )
+        except Exception:
+            nlu_result = {
+                "sql": "SELECT COUNT(*) as total FROM transactions",
+                "intent": "general overview",
+                "entities": [],
+                "is_followup": False
+            }
+
+        sql = nlu_result.get("sql", "")
+        intent = nlu_result.get("intent", question)
+        entities = nlu_result.get("entities", [])
+        is_followup = nlu_result.get("is_followup", False)
+
+        # ---- LAYER 2: SQL validation ----
+        sql_validation = self.validator.validate_sql(sql)
+        sql_issues = sql_validation.get("issues", [])
+
+        # Combine all issues
+        all_issues = question_issues + [i for i in sql_issues if i not in question_issues]
+        is_valid = not question_has_hallucination and sql_validation["is_valid"]
+
+        # Confidence adjustment
+        base_confidence = 0.9
+        if question_has_hallucination:
+            # Strong penalty: question itself asks for non-existent data
+            penalty = len(question_issues) * 0.3
+            confidence = max(0.1, base_confidence - penalty)
+        elif not sql_validation["is_valid"]:
+            # Gemini hallucinated in SQL despite valid question
+            penalty = len(sql_validation.get("hallucinated_columns", [])) * 0.25
+            confidence = max(0.1, base_confidence - penalty)
         else:
-            self.client = None
-            print("âš ï¸ LLM unavailable â€” using rule-based parser only")
+            confidence = base_confidence
 
-        self.fallback_parser = QueryParser()
-        
-        # Enhanced components for accuracy improvement
-        self.query_clarifier = QueryClarifier()
-        self.temporal_parser = TemporalParser()
-        self.context_defaults = ContextDefaults()
-        self.query_rewriter = QueryRewriter()
-        self.confidence_calibrator = ConfidenceCalibrator()
+        # Extra penalty for vague queries
+        if question.lower().strip() in {"show", "give", "list", "display"} or len(question.split()) <= 2:
+            confidence = min(confidence, 0.6)
 
-        # Load schema for LLM prompt building
-        self.schema = self._load_schema()
+        return ParsedQuery(
+            intent=intent, sql=sql, confidence=confidence,
+            entities=entities, is_followup=is_followup,
+            is_valid=is_valid, issues=all_issues
+        )
 
-        # -------------------------------------------------
-        # RAG Enhancer (optional, non-blocking)
-        # -------------------------------------------------
-        if RAG_AVAILABLE:
-            try:
-                self.query_enhancer = QueryEnhancer(
-                    persist_directory="../data/chroma_db",
-                    analytics_engine=self.analytics_engine if hasattr(self, "analytics_engine") else None
-                    )
-                print("âœ“ RAG enhancement enabled")
-            except Exception as e:
-                print(f"âš ï¸ RAG unavailable: {e}")
-                self.query_enhancer = None
-        else:
-            self.query_enhancer = None
+    def parse_with_history(self, question: str, conversation_history: list) -> ParsedQuery:
+        nlu_result = self.nlu.understand(
+            question=question,
+            conversation_history=conversation_history,
+            rag_context=""
+        )
+        sql = nlu_result.get("sql", "")
+        intent = nlu_result.get("intent", question)
+        entities = nlu_result.get("entities", [])
+        is_followup = nlu_result.get("is_followup", False)
 
-    def parse(self, query: str, use_llm: bool = True) -> ParsedQuery:
-        """Enhanced parsing with all improvements"""
-        
-        # Step 1: Query clarification (check if needs clarification)
-        # Note: Clarification handling should be done at API layer
-        # Here we just detect it
-        needs_clarification = self.query_clarifier.needs_clarification(query)
-        if needs_clarification:
-            # Could log or flag this, but continue with parsing
-            pass
-        
-        # Step 2: Query rewriting
-        rewritten_query = self.query_rewriter.rewrite(query)
-        
-        # Step 3: Temporal parsing
-        temporal_filters = self.temporal_parser.parse_temporal(query)
-        
-        # Step 4: LLM parsing
-        if use_llm and self.client:
-            try:
-                parsed = self._llm_parse(rewritten_query)
-                
-                # Add temporal filters
-                parsed.filters.update(temporal_filters)
-                
-                # Apply context defaults
-                parsed = self.context_defaults.apply_defaults(parsed, query)
-                
-                # RAG enhancement
-                if self.query_enhancer:
-                    enhanced, explanation = self.query_enhancer.enhance_parsed_query(query, parsed)
-                    
-                    # Calibrate confidence
-                    complexity = self.confidence_calibrator.assess_query_complexity(enhanced)
-                    rag_boost = (enhanced.confidence - parsed.confidence)
-                    
-                    # Will assess result quality after execution
-                    enhanced.confidence, _ = self.confidence_calibrator.calibrate(
-                        parsed.confidence, complexity, rag_boost, 1.0  # Assume good quality for now
-                    )
-                    
-                    return enhanced
-                
-                return parsed
-                
-            except Exception as e:
-                print(f"LLM error: {e}, falling back to rule-based parser")
-                # Fall back to rule-based
-        
-        # Fallback parsing
-        fallback = self.fallback_parser.parse(query)
-        fallback.filters.update(temporal_filters)
-        fallback = self.context_defaults.apply_defaults(fallback, query)
-        
-        if self.query_enhancer:
-            fallback, _ = self.query_enhancer.enhance_parsed_query(query, fallback)
-        
-        return fallback
-    def _llm_parse(self, query: str) -> ParsedQuery:
-        """Parse using Gemini LLM with retry logic"""
-    
-        prompt = self._build_prompt(query)
-    
-        # Retry logic for rate limits
-        import time
-        max_retries = 3
-        last_error = None
-    
-        for attempt in range(max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=prompt,
-                    config={
-                        "temperature": 0.1,  # Low temperature = less hallucination
-                        "top_p": 0.8,
-                        "top_k": 20,
-                        "max_output_tokens": 1000
-                    }
-                )
-            
-            # Success! Process response
-                text = response.text.strip()
-                text = text.replace("```json", "").replace("```", "").strip()
-                result = json.loads(text)
-            
-            # âœ… NORMALIZE METRICS FORMAT
-                metrics = result.get("metrics", [])
-                normalized_metrics = []
+        question_issues = self._scan_question_for_hallucinations(question)
+        sql_val = self.validator.validate_sql(sql)
+        all_issues = question_issues + sql_val.get("issues", [])
+        is_valid = len(question_issues) == 0 and sql_val["is_valid"]
 
-                for metric in metrics:
-                    if isinstance(metric, str) and metric.startswith("{"):
-                        try:
-                            import ast
-                            metric = ast.literal_eval(metric)
-                        except:
-                            pass
-                        
-                    if isinstance(metric, dict):
-                        # Gemini returned dict: {'aggregation': 'avg', 'column': 'amount_inr'}
-                        agg = (metric.get('function', '') or metric.get('aggregation', '')).lower()
-                        col = metric.get('column', '').lower()
-                    
-                    # Map to expected format
-                        if agg == 'avg' and 'amount' in col:
-                            normalized_metrics.append('avg_amount')
-                        elif agg == 'sum' and 'amount' in col:
-                            normalized_metrics.append('total_amount')
-                        elif agg == 'count':
-                            normalized_metrics.append('count')
-                        elif agg == 'median' and 'amount' in col:
-                            normalized_metrics.append('median_amount')
-                        elif agg and col:
-                            normalized_metrics.append(f"{agg}_{col.replace('_inr', '')}")
-                    else:
-                        # Already string format
-                        normalized_metrics.append(str(metric))
-            
-            # Fallback to original if normalization failed
-                if not normalized_metrics and metrics:
-                    normalized_metrics = [str(m) for m in metrics]
+        confidence = 0.9
+        if not is_valid:
+            confidence = max(0.1, 0.9 - 0.3 * len(question_issues) - 0.25 * len(sql_val.get("hallucinated_columns", [])))
 
-                # If still no metrics, use count as default
-                if not normalized_metrics:
-                    normalized_metrics = ['count']
+        return ParsedQuery(intent=intent, sql=sql, confidence=confidence,
+                           entities=entities, is_followup=is_followup,
+                           is_valid=is_valid, issues=all_issues)
 
-                return ParsedQuery(
-                    intent=QueryIntent(result["intent"]),
-                    metrics=normalized_metrics,
-                    dimensions=result["dimensions"],
-                    filters=result["filters"],
-                    original_query=query,
-                    confidence=result.get("confidence", 0.9)
-                )
+    def update_history(self, question: str, answer: str):
+        self._conversation_history.append({"role": "user", "content": question})
+        self._conversation_history.append({"role": "assistant", "content": answer})
+        if len(self._conversation_history) > 20:
+            self._conversation_history = self._conversation_history[-20:]
 
-            except Exception as e:
-                last_error = e
-                error_str = str(e)
-            
-            # Check if it's a rate limit error
-                if '503' in error_str or 'UNAVAILABLE' in error_str or 'high demand' in error_str.lower():
-                    if attempt < max_retries - 1:
-                        wait_time = (attempt + 1) * 3  # 3s, 6s, 9s
-                        print(f"â³ Gemini rate limited, retrying in {wait_time}s... (attempt {attempt + 2}/{max_retries})")
-                        time.sleep(wait_time)
-                        continue
-            
-                # Not a rate limit error, or final attempt - raise it
-                raise
-    
-        # All retries failed
-        raise last_error
-
-    def _build_prompt(self, query: str) -> str:
-        return f"""
-You are an expert query parser for payment transaction analytics.
-
-DATABASE SCHEMA:
-{json.dumps(self.schema, indent=2)}
-
-USER QUERY:
-"{query}"
-
-Return ONLY valid JSON.
-
-FORMAT:
-{{
-  "intent": "descriptive|comparative|temporal|segmentation|risk",
-  "metrics": [],
-  "dimensions": [],
-  "filters": {{}},
-  "confidence": 0.95
-}}
-"""
-
-    def _load_schema(self):
-        return {
-            "table": "transactions",
-            "columns": [
-                "transaction_type",
-                "merchant_category",
-                "amount_inr",
-                "transaction_status",
-                "sender_age_group",
-                "sender_state",
-                "device_type",
-                "network_type",
-                "fraud_flag",
-                "hour_of_day",
-                "is_weekend"
-            ]
-        }
-
-
-# -----------------------------------------------------------------------------
-# TESTING
-# -----------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    parser = LLMParser()
-
-    queries = [
-        "What is the average P2M transaction amount?",
-        "Compare failure rates by device type",
-        "Which age group has the highest fraud flag rate?",
-        "Show me weekend transactions in Maharashtra",
-        "What are the peak transaction hours?",
-        "Break down transactions by merchant category",
-        "How many food transactions on Android devices?",
-        "What is the success rate for 18-25 age group?",
-        "Total transaction volume",
-        "P2P transactions by state"
-    ]
-
-    for q in queries:
-        print("\nQuery:", q)
-        pq = parser.parse(q)
-        print("Intent:", pq.intent.value)
-        print("Metrics:", pq.metrics)
-        print("Dimensions:", pq.dimensions)
-        print("Filters:", pq.filters)
-        print("Confidence:", pq.confidence)
-
+    def clear_history(self):
+        self._conversation_history = []
 
