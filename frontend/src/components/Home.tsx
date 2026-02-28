@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, FC, ChangeEvent, KeyboardEvent } from "react";
 import NexusLogo from "./NexusLogo";
 import { indexdbService } from "../services/indexdbService";
+import LoginCard from "./LoginCard";
 
 declare global {
   interface Window {
@@ -554,6 +555,95 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .modal-toggle{text-align:center;margin-top:13px;font-size:12px;color:var(--text3);}
 .modal-toggle button{background:none;border:none;cursor:pointer;color:var(--accent);font-size:12px;font-weight:600;text-decoration:underline;}
 
+.modal-overlay{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,0.65);
+  backdrop-filter:blur(14px);
+  z-index:100;
+  display:flex;align-items:center;justify-content:center;
+  animation:fadeIn .22s ease;
+}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+.login-card{
+  position:relative;
+  width:min(420px,94vw);
+  background:rgba(8,16,32,0.78);
+  backdrop-filter:blur(36px);
+  border:1.5px solid rgba(59,130,246,0.28);
+  border-radius:24px;
+  padding:44px 40px 36px;
+  box-shadow:
+    0 40px 100px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(59,130,246,0.06),
+    inset 0 1px 0 rgba(255,255,255,0.07);
+  animation:cardSlideUp .32s var(--ease-spring) both;
+  overflow:hidden;
+}
+@keyframes cardSlideUp{
+  from{opacity:0;transform:translateY(28px) scale(0.96);}
+  to{opacity:1;transform:translateY(0) scale(1);}
+}
+.login-card-bar{
+  position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,#3B82F6 0%,#1DD1EE 50%,#a78bfa 100%);
+  border-radius:24px 24px 0 0;
+}
+.login-card::after{
+  content:'';position:absolute;top:-60px;right:-60px;
+  width:200px;height:200px;
+  background:radial-gradient(circle,rgba(59,130,246,0.12) 0%,transparent 70%);
+  pointer-events:none;
+}
+.login-card-close{
+  position:absolute;top:16px;right:16px;
+  width:30px;height:30px;border-radius:8px;
+  background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+  color:var(--text3);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:all .14s;z-index:2;
+}
+.login-card-close:hover{background:rgba(255,77,106,0.12);border-color:rgba(255,77,106,0.3);color:var(--danger);}
+.login-brand{display:flex;align-items:center;gap:11px;margin-bottom:28px;}
+.login-brand-name{font-size:15px;font-weight:900;letter-spacing:-.03em;color:#fff;}
+.login-brand-name em{color:var(--accent);font-style:normal;}
+.login-brand-tag{font-size:8.5px;color:var(--text3);letter-spacing:.12em;text-transform:uppercase;margin-top:1px;}
+.login-heading{font-size:24px;font-weight:900;letter-spacing:-.05em;color:#fff;margin-bottom:6px;}
+.login-subheading{font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:30px;}
+.login-field{margin-bottom:16px;}
+.login-field-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;}
+.login-label{font-size:10px;font-weight:700;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;}
+.login-forgot{font-size:10px;color:var(--accent2);cursor:pointer;transition:color .14s;background:none;border:none;padding:0;}
+.login-forgot:hover{color:var(--accent);}
+.login-input-wrap{position:relative;}
+.login-input-icon{
+  position:absolute;left:13px;top:50%;transform:translateY(-50%);
+  color:var(--text3);font-size:13px;pointer-events:none;transition:color .15s;
+}
+.login-input{
+  width:100%;padding:11px 13px 11px 38px;
+  background:rgba(255,255,255,0.04);backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,0.1);border-radius:10px;
+  font-size:13.5px;color:var(--text);outline:none;
+  transition:border-color .18s,box-shadow .18s,background .18s;
+}
+.login-input::placeholder{color:rgba(160,174,192,0.55);}
+.login-input:focus{border-color:rgba(59,130,246,0.55);box-shadow:0 0 0 3px rgba(59,130,246,0.12);background:rgba(59,130,246,0.04);}
+.login-input:focus + .login-input-icon,.login-input-wrap:focus-within .login-input-icon{color:var(--accent);}
+.login-submit{
+  width:100%;padding:13px;margin-top:6px;
+  background:linear-gradient(135deg,#1D4ED8 0%,#0ea5e9 100%);
+  border:none;border-radius:11px;font-size:14px;font-weight:700;color:#fff;
+  cursor:pointer;box-shadow:0 4px 20px rgba(29,78,216,0.38);
+  transition:all .2s var(--ease-out);position:relative;overflow:hidden;
+}
+.login-submit::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.1),transparent);opacity:0;transition:opacity .2s;}
+.login-submit:hover{box-shadow:0 8px 32px rgba(29,78,216,0.55);transform:translateY(-2px);}
+.login-submit:hover::before{opacity:1;}
+.login-submit:active{transform:translateY(0);box-shadow:0 4px 16px rgba(29,78,216,0.35);}
+.login-trust{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:20px;font-size:10px;color:var(--text3);}
+.login-trust-dot{width:3px;height:3px;border-radius:50%;background:var(--text3);opacity:.4;}
+
 /* ── LIGHTBOX ── */
 .lightbox-overlay{position:fixed;inset:0;background:rgba(0,0,0,.88);backdrop-filter:blur(12px);z-index:200;display:flex;align-items:center;justify-content:center;animation:fadeIn .2s ease;cursor:zoom-out;}
 .lightbox-img{max-width:90vw;max-height:88vh;border-radius:10px;box-shadow:0 24px 72px rgba(0,0,0,.7);}
@@ -956,19 +1046,8 @@ const TypingIndicator: FC = () => (
 );
 
 // ── Auth Modal ──
-const AuthModal: FC<{ mode: string; onClose: () => void; onToggleMode: () => void }> = ({ mode, onClose, onToggleMode }) => (
-  <div className="modal-overlay" onClick={onClose}>
-    <div className="modal" onClick={e => e.stopPropagation()}>
-      <button className="modal-close" onClick={onClose}>✕</button>
-      <h2>{mode === "login" ? "Welcome back" : "Create account"}</h2>
-      <p>{mode === "login" ? "Log in to your NEXUS workspace." : "Start making smarter payment decisions."}</p>
-      {mode === "signup" && <div className="field"><label>Full Name</label><input type="text" placeholder="Jane Doe" /></div>}
-      <div className="field"><label>Work Email</label><input type="email" placeholder="jane@company.com" /></div>
-      <div className="field"><label>Password</label><input type="password" placeholder="••••••••" /></div>
-      <button className="modal-submit">{mode === "login" ? "Log in →" : "Create account →"}</button>
-      <div className="modal-toggle">{mode === "login" ? "Don't have an account? " : "Already have an account? "}<button onClick={onToggleMode}>{mode === "login" ? "Sign up" : "Log in"}</button></div>
-    </div>
-  </div>
+const AuthModal: FC<{ mode: string; onClose: () => void; onToggleMode: () => void }> = ({ onClose }) => (
+  <LoginCard onClose={onClose} />
 );
 
 // ── Input Bar ──
