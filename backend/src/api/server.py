@@ -60,6 +60,7 @@ class QueryResponse(BaseModel):
     benchmarkComparison: Optional[str] = None
     ragContextUsed: bool = False
     chartData: Optional[List[ChartDataItem]] = None
+    chartType: Optional[str] = None
     intent: Optional[str] = None
     isFollowup: bool = False
     needsClarification: bool = False
@@ -126,7 +127,11 @@ async def query(request: QueryRequest, http_request: Request):
             with contextlib.suppress(asyncio.CancelledError):
                 await monitor_task
 
-        chart_data = _generate_chart_data(result.get("result"))
+        chart_data, chart_type = _generate_chart_data(
+            result.get("result"),
+            result.get("intent", ""),
+            request.question
+        )
 
         return QueryResponse(
             id=str(uuid.uuid4()),
@@ -143,6 +148,7 @@ async def query(request: QueryRequest, http_request: Request):
             benchmarkComparison=result.get("benchmark_comparison", ""),
             ragContextUsed=result.get("rag_context_used", False),
             chartData=chart_data,
+            chartType=chart_type,
             intent=result.get("intent", ""),
             isFollowup=result.get("is_followup", False),
             needsClarification=result.get("needs_clarification", False),
@@ -207,22 +213,64 @@ async def get_precomputed():
         raise HTTPException(500, str(e))
 
 
-def _generate_chart_data(result) -> Optional[List[Dict]]:
+def _generate_chart_data(result, intent: str = "", question: str = "") -> tuple[Optional[List[Dict]], Optional[str]]:
     if result is None or result.empty or len(result) <= 1:
-        return None
+        return None, None
     cat_cols = [c for c in result.columns if result[c].dtype == object]
     num_cols = [c for c in result.columns if pd.api.types.is_numeric_dtype(result[c])]
-    if not cat_cols or not num_cols or len(result) > 20:
-        return None
+    # Allow longer series (e.g., 24 hourly points) for trend charts.
+    if not num_cols or len(result) > 60:
+        return None, None
+
+    def _is_time_like(col_name: str) -> bool:
+        c = col_name.lower()
+        tokens = ["time", "hour", "day", "date", "week", "month", "year", "timestamp"]
+        return any(t in c for t in tokens)
+
+    def _pick_chart_type(label_col: str, value_col: str) -> str:
+        lcol = label_col.lower()
+        v = result[value_col]
+        v_sum = float(v.sum()) if len(v) else 0.0
+        looks_percent = v_sum > 99 and v_sum < 101
+        intent_l = (intent or "").lower()
+        question_l = (question or "").lower()
+        label_values = set(str(x).strip().lower() for x in result[label_col].head(10).tolist())
+        status_like_labels = label_values.issubset({"success", "failed", "pending"})
+        numeric_label_series = pd.api.types.is_numeric_dtype(result[label_col]) and len(result) >= 5
+
+        # Explicit user request should win.
+        if any(k in question_l for k in ["line graph", "line chart", "trend line", "time series", "timeline"]):
+            if _is_time_like(lcol) or numeric_label_series:
+                return "line"
+            if status_like_labels:
+                return "pie"
+            return "bar"
+        if any(k in question_l for k in ["pie chart", "donut chart", "distribution chart", "share chart"]):
+            return "pie"
+        if any(k in question_l for k in ["bar graph", "bar chart", "column chart"]):
+            return "bar"
+
+        if _is_time_like(lcol):
+            return "line"
+        if any(k in intent_l for k in ["trend", "over time", "month", "hour", "daily", "weekly"]):
+            return "line"
+        if len(result) <= 8 and (looks_percent or any(k in intent_l for k in ["share", "breakdown", "distribution", "composition", "split"])):
+            return "pie"
+        return "bar"
+
     colors = ["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#14b8a6","#f97316","#84cc16"]
-    label_col, value_col = cat_cols[0], num_cols[0]
+    # Prefer categorical label; fallback to first numeric as x-axis label (e.g., hour_of_day).
+    label_col = cat_cols[0] if cat_cols else num_cols[0]
+    value_col = num_cols[1] if (not cat_cols and len(num_cols) > 1) else num_cols[0]
+    chart_type = _pick_chart_type(label_col, value_col)
     chart_data = []
-    for idx, row in result.head(10).iterrows():
+    max_points = 24 if chart_type == "line" else 10
+    for idx, row in result.head(max_points).iterrows():
         try:
             chart_data.append({"label": str(row[label_col]), "value": float(row[value_col]), "color": colors[idx % len(colors)]})
         except Exception:
             continue
-    return chart_data if chart_data else None
+    return (chart_data, chart_type) if chart_data else (None, None)
 
 
 if __name__ == "__main__":

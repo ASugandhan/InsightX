@@ -120,6 +120,11 @@ Instructions:
 2. Write a precise DuckDB SQL query answering using ALL 250,000 rows
 3. For follow-up questions, incorporate filters/context from previous messages
 4. Never limit results unless user says "top N" or "first N"
+5. Match requested granularity exactly:
+   - "hourly" => GROUP BY hour_of_day ORDER BY hour_of_day
+   - "daily/weekly/monthly" => group by corresponding time bucket
+6. If user asks for "failure rate over time", do NOT return only transaction_status split.
+   Return a time-series with at least: time bucket + failure_rate.
 
 Respond ONLY in this JSON format (no markdown, no explanation):
 {{
@@ -175,8 +180,19 @@ Only use these columns: transaction_id, timestamp, sender_id, receiver_id, amoun
             is_followup = any(t in q_lower for t in followup_triggers)
 
         best_sql, best_intent, best_score = None, None, 0
+        has_time_intent = any(k in q_lower for k in ["hour", "hourly", "daily", "weekly", "monthly", "trend", "over time", "timeline"])
         for keywords, sql, intent in FALLBACK_TEMPLATES:
-            score = sum(1 for kw in keywords if kw in q_lower)
+            # Prefer whole-word style matching to avoid accidental substring hits
+            score = 0
+            for kw in keywords:
+                if re.search(rf"\b{re.escape(kw)}\b", q_lower):
+                    score += 1
+                elif kw in q_lower:
+                    score += 0.5
+
+            # Boost time-granularity templates when user clearly asks trend/time
+            if has_time_intent and ("hour" in intent.lower() or "weekend vs weekday" in intent.lower()):
+                score += 1.5
             if score > best_score:
                 best_score = score
                 best_sql = sql
@@ -191,5 +207,4 @@ Only use these columns: transaction_id, timestamp, sender_id, receiver_id, amoun
             "entities": [],
             "is_followup": is_followup
         }
-
 

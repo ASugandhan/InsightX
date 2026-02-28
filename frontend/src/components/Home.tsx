@@ -23,11 +23,14 @@ interface Message {
   timestamp: Date;
   attachments?: { name: string; type: string; preview?: string }[];
   chartData?: ChartDataItem[];
+  chartType?: ChartType;
   confidence?: string;
   sampleSize?: number;
   execMs?: number;
   isError?: boolean;
 }
+
+type ChartType = "bar" | "line" | "pie";
 
 interface ChartDataItem {
   label: string;
@@ -511,7 +514,22 @@ body{background:var(--bg);color:var(--text);margin:0;}
   text-shadow: 0 1px 2px rgba(0,0,0,0.4);
 }
 
-/* ── DATA TABLE ── */
+.chart-layout{display:grid;grid-template-columns:180px 1fr;gap:14px;align-items:center;}
+.donut{
+  width:160px;height:160px;border-radius:50%;
+  border:1px solid rgba(255,255,255,0.1);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.06);
+}
+.pie-legend{display:flex;flex-direction:column;gap:8px;}
+.legend-item{display:flex;align-items:center;gap:8px;font-family:'DM Mono',monospace;font-size:11px;color:var(--text2);}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.line-wrap{height:190px;background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:8px;}
+.line-svg{width:100%;height:100%;}
+.line-axis{font-family:'DM Mono',monospace;font-size:9px;fill:var(--text3);}
+.line-stroke{fill:none;stroke:#3B82F6;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;}
+.line-fill{fill:rgba(59,130,246,0.12);}
+.line-point{fill:#1DD1EE;stroke:#0a1628;stroke-width:1.2;}
+/* -- DATA TABLE -- */
 .data-card{margin-top:11px;background:rgba(255,255,255,0.05);backdrop-filter:blur(14px);border:1.5px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.1);}
 [data-theme="light"] .data-card{background:rgba(240,245,255,0.4);border-color:rgba(0,0,0,0.06);}
 .data-card-head{padding:7px 13px;border-bottom:1px solid rgba(255,255,255,0.1);font-family:'DM Mono',monospace;font-size:9.5px;color:var(--accent);letter-spacing:.07em;background:rgba(0,229,160,0.08);}
@@ -864,9 +882,105 @@ const fmtTime = (d: Date): string => d.toLocaleTimeString([], { hour: "2-digit",
 
 // ── Sub-components ──
 
-const ResponseChart: FC<{ data: ChartDataItem[] }> = ({ data }) => {
+const inferChartType = (data: ChartDataItem[]): ChartType => {
+  if (!data || data.length === 0) return "bar";
+  const labels = data.map(d => d.label.toLowerCase());
+  const isTime = labels.every(l => /^\d{1,2}$/.test(l) || l.includes("hour") || l.includes("day") || l.includes("month") || l.includes("week") || l.includes("date"));
+  const total = data.reduce((s, d) => s + (Number.isFinite(d.value) ? d.value : 0), 0);
+  const near100 = total > 95 && total < 105;
+  if (isTime) return "line";
+  if (data.length <= 8 && near100) return "pie";
+  return "bar";
+};
+
+const fmtChartVal = (v: number): string => {
+  if (Math.abs(v) >= 1000000) return `${(v / 1000000).toFixed(2)}M`;
+  if (Math.abs(v) >= 1000) return `${(v / 1000).toFixed(1)}K`;
+  return Number.isInteger(v) ? `${v}` : v.toFixed(2);
+};
+
+const resolveChartColor = (raw: string | undefined, i: number): string => {
+  const palette = ["#3B82F6", "#1DD1EE", "#f59e0b", "#ff4d6a", "#10b981", "#8b5cf6"];
+  if (!raw) return palette[i % palette.length];
+  const v = raw.toLowerCase();
+  if (v === "amber") return "#f59e0b";
+  if (v === "danger") return "#ff4d6a";
+  if (v === "ok") return "#10b981";
+  if (v.startsWith("#") || v.startsWith("rgb") || v.startsWith("hsl")) return raw;
+  return palette[i % palette.length];
+};
+
+const ResponseChart: FC<{ data: ChartDataItem[]; chartType?: ChartType }> = ({ data, chartType }) => {
   const [animated, setAnimated] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setAnimated(true), 100); return () => clearTimeout(t); }, []);
+  useEffect(() => { const t = setTimeout(() => setAnimated(true), 120); return () => clearTimeout(t); }, []);
+
+  const type = chartType || inferChartType(data);
+  const max = Math.max(...data.map(d => Math.abs(d.value)), 1);
+
+  if (type === "pie") {
+    const sum = data.reduce((s, d) => s + Math.max(0, d.value), 0) || 1;
+    let cursor = 0;
+    const segments = data.map((d, i) => {
+      const start = (cursor / sum) * 360;
+      cursor += Math.max(0, d.value);
+      const end = (cursor / sum) * 360;
+      const color = resolveChartColor(d.color, i);
+      return `${color} ${start}deg ${end}deg`;
+    });
+
+    return (
+      <div className="response-chart">
+        <div className="chart-title">Visual breakdown</div>
+        <div className="chart-layout">
+          <div className="donut" style={{ background: `conic-gradient(${segments.join(",")})` }} />
+          <div className="pie-legend">
+            {data.map((d, i) => {
+              const color = resolveChartColor(d.color, i);
+              const pct = ((Math.max(0, d.value) / sum) * 100).toFixed(1);
+              return (
+                <div key={i} className="legend-item">
+                  <span className="legend-dot" style={{ background: color }} />
+                  <span>{d.label}: {fmtChartVal(d.value)} ({pct}%)</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (type === "line") {
+    const w = 560;
+    const h = 170;
+    const padX = 22;
+    const padY = 18;
+    const stepX = data.length > 1 ? (w - padX * 2) / (data.length - 1) : 0;
+    const points = data.map((d, i) => {
+      const x = padX + i * stepX;
+      const y = h - padY - ((d.value / max) * (h - padY * 2));
+      return { x, y, label: d.label, value: d.value };
+    });
+    const linePath = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x},${p.y}`).join(" ");
+    const areaPath = `${linePath} L${padX + (data.length - 1) * stepX},${h - padY} L${padX},${h - padY} Z`;
+
+    return (
+      <div className="response-chart">
+        <div className="chart-title">Trend line</div>
+        <div className="line-wrap">
+          <svg className="line-svg" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+            <path className="line-fill" d={areaPath} style={{ opacity: animated ? 1 : 0 }} />
+            <path className="line-stroke" d={linePath} style={{ opacity: animated ? 1 : 0 }} />
+            {points.map((p, i) => <circle key={i} className="line-point" cx={p.x} cy={p.y} r="3.2" />)}
+            {points.map((p, i) => (
+              <text key={`x-${i}`} className="line-axis" x={p.x} y={h - 3} textAnchor="middle">{p.label}</text>
+            ))}
+          </svg>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="response-chart">
       <div className="chart-title">Visual breakdown</div>
@@ -877,9 +991,9 @@ const ResponseChart: FC<{ data: ChartDataItem[] }> = ({ data }) => {
             <div className="chart-track">
               <div
                 className={`chart-fill${bar.color ? " " + bar.color : ""}`}
-                style={{ width: animated ? `${bar.value}%` : "0%" }}
+                style={{ width: animated ? `${Math.max(2, (Math.abs(bar.value) / max) * 100)}%` : "0%" }}
               >
-                <span className="chart-val">{bar.value}%</span>
+                <span className="chart-val">{fmtChartVal(bar.value)}</span>
               </div>
             </div>
           </div>
@@ -1339,7 +1453,7 @@ const ChatMessage: FC<{ message: Message; onCopy: (text: string) => void; onImag
         </div>
       )}
       <div className="bubble-text">{message.text}</div>
-      {message.chartData && message.chartData.length > 0 && <ResponseChart data={message.chartData} />}
+      {message.chartData && message.chartData.length > 0 && <ResponseChart data={message.chartData} chartType={message.chartType} />}
 
     </div>
   </div>
@@ -1754,7 +1868,8 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
         confidence: "HIGH", // We don't get confidence from the API directly yet, but can mock it
         sampleSize: data.rowCount,
         execMs: data.executionMs,
-        chartData: data.chartData || makeDemoChart(text), // fallback to demo chart if none returned
+        chartData: data.chartData,
+        chartType: (data.chartType as ChartType | undefined),
       };
       setMessages(prev => [...prev, aiMsg]);
       const entry: HistoryItem = { id: Date.now().toString(), title: (text.trim() || (attachmentMeta[0]?.name ?? "File")).slice(0, 38), time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
@@ -1844,6 +1959,8 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     </>
   );
 }
+
+
 
 
 
