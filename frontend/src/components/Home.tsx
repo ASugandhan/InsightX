@@ -429,6 +429,15 @@ body{background:var(--bg);color:var(--text);margin:0;}
 .chat-input{flex:1;border:none !important;background:transparent !important;font-size:13.5px;color:var(--text);resize:none;outline:none;min-height:22px;max-height:120px;line-height:1.55;display:block;vertical-align:middle;padding:0 !important;box-shadow:none !important;}
 .chat-input::placeholder{color:#8ea3c2;font-style:italic;}
 .input-actions{display:flex;align-items:center;gap:5px;flex-shrink:0;margin-bottom:1px;}
+.report-btn{
+  height:32px;padding:0 10px;border-radius:7px;
+  background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);
+  border:1px solid rgba(255,255,255,0.15);cursor:pointer;
+  color:var(--text2);font-size:11px;font-weight:600;letter-spacing:.02em;
+  transition:all .16s;white-space:nowrap;
+}
+.report-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,0.1);}
+.report-btn:disabled{opacity:.45;cursor:not-allowed;}
 .attach-btn{width:32px;height:32px;border-radius:7px;background:rgba(255,255,255,0.05);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text3);transition:all .16s;position:relative;flex-shrink:0;}
 .attach-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(59,130,246,0.1);}
 .attach-btn.has-files{border-color:rgba(59,130,246,.45);color:var(--accent);background:rgba(59,130,246,.07);}
@@ -1064,10 +1073,11 @@ const InputBar: FC<{
   onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
   onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onSend: () => void; onStop: () => void; onVoiceToggle: () => void;
+  onGenerateReport: () => void; canGenerateReport: boolean;
   isListening: boolean; speechSupported: boolean;
   onFilesAttach: (files: File[]) => void; onRemoveAttach: (id: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement>; typewriterText?: string;
-}> = ({ input, isTyping, attachedFiles, onChange, onKeyDown, onSend, onStop, onVoiceToggle, isListening, speechSupported, onFilesAttach, onRemoveAttach, textareaRef, typewriterText }) => {
+}> = ({ input, isTyping, attachedFiles, onChange, onKeyDown, onSend, onStop, onVoiceToggle, onGenerateReport, canGenerateReport, isListening, speechSupported, onFilesAttach, onRemoveAttach, textareaRef, typewriterText }) => {
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
   const [dragOver, setDragOver] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1113,6 +1123,9 @@ const InputBar: FC<{
           onKeyDown={onKeyDown}
         />
         <div className="input-actions">
+          <button className="report-btn" onClick={onGenerateReport} disabled={!canGenerateReport} title="Generate report from this chat">
+            Generate Report
+          </button>
           <div className="attach-menu-wrap" ref={menuRef}>
             {menuOpen && (
               <div className="attach-menu">
@@ -1388,6 +1401,142 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
     setIsTyping(false);
   }, []);
 
+  const handleGenerateReport = useCallback((): void => {
+    if (messages.length === 0) return;
+    const now = new Date();
+    const sessionTitle = historyItems.find((h) => h.id === activeHist)?.title || "InsightX Chat Report";
+    const safeTitle = sessionTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "insightx-chat-report";
+
+    const userMessages = messages.filter((m) => m.role === "user" && m.text.trim());
+    const aiMessages = messages.filter((m) => m.role === "ai" && !m.isError && m.text.trim());
+
+    const stripMarkdown = (text: string): string =>
+      text
+        .replace(/```[\s\S]*?```/g, " ")
+        .replace(/`([^`]+)`/g, "$1")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/\*([^*]+)\*/g, "$1")
+        .replace(/#+\s/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const escapeHtml = (value: string): string =>
+      value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+
+    const splitSentences = (text: string): string[] =>
+      stripMarkdown(text)
+        .split(/(?<=[.!?])\s+/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 20);
+
+    const aiCorpus = aiMessages.map((m) => stripMarkdown(m.text)).join(" ");
+    const latestAiText = aiMessages.length > 0 ? stripMarkdown(aiMessages[aiMessages.length - 1].text) : "";
+
+    const executiveSummary = ((): string[] => {
+      const preferred = splitSentences(latestAiText);
+      if (preferred.length >= 2) return preferred.slice(0, 3);
+      const fallback = splitSentences(aiCorpus);
+      if (fallback.length > 0) return fallback.slice(0, 3);
+      const userFallback = userMessages.length > 0 ? stripMarkdown(userMessages[userMessages.length - 1].text) : "No analytical conversation available.";
+      return [userFallback];
+    })();
+
+    const keyFindings = ((): string[] => {
+      const pool = splitSentences(aiCorpus);
+      const picked = pool.filter((s) => /(₹|rs|inr|%|\d)/i.test(s)).slice(0, 6);
+      if (picked.length > 0) return Array.from(new Set(picked)).slice(0, 6);
+      return pool.slice(0, 5);
+    })();
+
+    const recommendations = ((): string[] => {
+      const pool = splitSentences(aiCorpus);
+      const picked = pool.filter((s) => /(recommend|next|should|consider|follow-up|analy[sz]e|check|monitor|investigate)/i.test(s)).slice(0, 5);
+      if (picked.length > 0) return Array.from(new Set(picked)).slice(0, 5);
+      const joinedQueries = userMessages.map((m) => m.text.toLowerCase()).join(" ");
+      const fallback: string[] = [];
+      if (joinedQueries.includes("fraud")) fallback.push("Run a category-wise and bank-wise fraud deep-dive to isolate concentration risk.");
+      if (joinedQueries.includes("failure")) fallback.push("Track hourly failure rates by channel and bank to identify repeat outage windows.");
+      if (joinedQueries.includes("revenue")) fallback.push("Track weekly and monthly revenue trend with baseline vs projection variance.");
+      if (fallback.length === 0) fallback.push("Validate key metrics with segmented breakdowns before final business decision.");
+      return fallback.slice(0, 5);
+    })();
+
+    const scopeQuestions = userMessages.map((m) => stripMarkdown(m.text)).filter(Boolean).slice(-6);
+
+    const chartPoints = Array.from(
+      new Map(
+        messages
+          .flatMap((m) => (m.chartData || []).map((d) => [`${d.label}`, d.value] as const))
+          .reverse()
+      ).entries()
+    )
+      .map(([label, value]) => ({ label, value }))
+      .slice(0, 10);
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(sessionTitle)}</title>
+  <style>
+    body { font-family: Calibri, Arial, sans-serif; margin: 28px; color: #111827; line-height: 1.5; }
+    h1 { font-size: 24px; margin: 0 0 6px 0; }
+    h2 { font-size: 16px; margin: 22px 0 8px 0; color: #1f2937; }
+    p, li { font-size: 11pt; }
+    .meta { color: #4b5563; font-size: 10pt; margin-bottom: 12px; }
+    .section { margin-bottom: 6px; }
+    .box { border: 1px solid #d1d5db; padding: 10px 12px; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+    th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; font-size: 10.5pt; }
+    th { background: #f3f4f6; }
+  </style>
+</head>
+<body>
+  <h1>${escapeHtml(sessionTitle)}</h1>
+  <div class="meta">Generated: ${escapeHtml(now.toLocaleString())} | Messages analyzed: ${messages.length}</div>
+
+  <h2>Executive Summary</h2>
+  <div class="box">
+    <ul>${executiveSummary.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+  </div>
+
+  <h2>Key Findings</h2>
+  <ul>${(keyFindings.length ? keyFindings : ["No strong findings were extracted from the current conversation."]).map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+
+  <h2>Recommendations</h2>
+  <ul>${recommendations.map((s) => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
+
+  <h2>Conversation Scope</h2>
+  <ul>${(scopeQuestions.length ? scopeQuestions : ["No user questions captured."]).map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ul>
+
+  <h2>Referenced Data Points</h2>
+  ${chartPoints.length ? `
+    <table>
+      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+      <tbody>
+        ${chartPoints.map((d) => `<tr><td>${escapeHtml(d.label)}</td><td>${escapeHtml(String(d.value))}</td></tr>`).join("")}
+      </tbody>
+    </table>
+  ` : "<p>No structured chart data detected in this conversation.</p>"}
+</body>
+</html>`;
+
+    const blob = new Blob([`\ufeff${html}`], { type: "application/msword;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeTitle}-${now.toISOString().slice(0, 10)}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [messages, historyItems, activeHist]);
+
   // ── Load a specific session by id ──
   const loadSessionById = async (sessionId: string) => {
     try {
@@ -1574,6 +1723,7 @@ export default function NEXUS({ introReady }: { introReady?: boolean }) {
                   onChange={(e: ChangeEvent<HTMLTextAreaElement>) => { setInput(e.target.value); autoResize(); }}
                   onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(input); } }}
                   onSend={() => sendMessage(input)} onStop={handleStop}
+                  onGenerateReport={handleGenerateReport} canGenerateReport={messages.length > 0 && !isTyping}
                   onVoiceToggle={handleVoiceToggle} isListening={isListening} speechSupported={speechSupported}
                   onFilesAttach={handleFilesAttach} onRemoveAttach={handleRemoveAttach}
                   textareaRef={textareaRef as React.RefObject<HTMLTextAreaElement>}
