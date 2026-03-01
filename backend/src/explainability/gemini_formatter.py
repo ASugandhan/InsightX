@@ -38,7 +38,8 @@ class GeminiResponseFormatter:
         rag_str = f"\nFinancial domain context:\n{rag_context}" if rag_context else ""
         tips_str = ("\n\nOptional follow-up ideas:\n" + "\n".join(f"- {t}" for t in tips[:3])) if tips else ""
 
-        prompt = f"""You are InsightX, a financial analytics assistant for UPI data.
+        prompt = f"""You are Nexus, a financial analytics assistant for UPI data.
+If you introduce yourself, use the name "Nexus" (never "InsightX").
 
 User question: "{question}"
 Intent: {intent}

@@ -103,7 +103,7 @@ class InputGuardrail:
         # Off-topic / abuse detection
         for pattern in self.off_topic_patterns:
             if pattern.search(q):
-                return False, "This query is outside the scope of InsightX. I can only answer questions about UPI transaction data."
+                return False, "This query is outside the scope of Nexus. I can only answer questions about UPI transaction data."
 
         return True, ""
 
