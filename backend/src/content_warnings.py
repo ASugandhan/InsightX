@@ -494,7 +494,7 @@ WARNING_MESSAGES = {
             "'What is the failure rate for transactions over Rs 5000?' or 'Which age group has the highest fraud rate?'"
         ),
         "greeting_only": (
-            "👋 Hello! Welcome to InsightX - Your UPI Transaction Analytics Assistant!\n\n"
+            "👋 Hello! Welcome to Nexus - Your UPI Transaction Analytics Assistant!\n\n"
             "What would you like to know about your UPI transactions? 🤔\n\n"
             "Here are some insights I can provide:\n"
             "  📊 Transaction Trends: Patterns over time, peak hours, seasonal changes\n"
@@ -727,3 +727,4 @@ class ContentWarningDetector:
         }
         
         return examples_by_category.get(category, examples_by_category["default"])
+

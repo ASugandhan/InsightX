@@ -736,14 +736,6 @@ body{background:var(--bg);color:var(--text);margin:0;}
 `;
 
 // ── Data ──
-
-const KPI_CARDS = [
-  { icon: "💰", label: "Total GMV Today", value: "$4.82M", delta: "+12.4%", dir: "up", variant: "" },
-  { icon: "✅", label: "Success Rate", value: "97.6%", delta: "+0.4pp", dir: "up", variant: "" },
-  { icon: "❌", label: "Failed Txns Today", value: "1,284", delta: "+31%", dir: "down", variant: "danger-card" },
-  { icon: "🚨", label: "Fraud Flagged", value: "0.08%", delta: "−0.02pp", dir: "up", variant: "" },
-];
-
 const SUGGESTIONS = [
   { tag: "revenue", tagLabel: "REVENUE", icon: "💰", title: "Revenue by channel", desc: "Break down today's GMV by UPI, cards, wallets and BNPL" },
   { tag: "risk", tagLabel: "RISK", icon: "🛡️", title: "Fraud hotspots", desc: "Which merchant categories have the highest fraud rate this week?" },
@@ -891,81 +883,6 @@ const NarrativeBanner: FC<{ onAsk: (text: string) => void }> = ({ onAsk }) => (
       </div>
     </div>
     <div className="nb-cta">Ask why →</div>
-  </div>
-);
-
-const SampleConvo: FC<{ onAsk: (text: string) => void }> = ({ onAsk }) => (
-  <div className="sample-convo">
-    <div className="sample-convo-head">
-      <span className="sample-convo-title">▸ SEE HOW IT WORKS</span>
-      <span className="sample-convo-badge">EXAMPLE</span>
-    </div>
-    <div className="sample-q">
-      <div className="sample-q-avatar">U</div>
-      <div className="sample-q-text">Why did failure rates spike on Tuesday between 2–4 PM IST?</div>
-    </div>
-    <div className="sample-a">
-      <div className="sample-a-avatar">NX</div>
-      <div style={{ flex: 1 }}>
-        <div className="sample-a-text">
-          Tuesday's failure spike (<strong>14.2% vs 4.1% baseline</strong>) traces to a payment gateway timeout on the HDFC corridor. 83% of failures were UPI. Estimated <strong>₹2.1M revenue impact</strong>. Gateway was restored at 16:28 IST.
-        </div>
-        <div className="sample-a-chips">
-          <span className="sample-chip danger">↑ 14.2% failure rate</span>
-          <span className="sample-chip danger">₹2.1M impacted</span>
-          <span className="sample-chip ok">✓ Resolved 16:28 IST</span>
-          <span className="sample-chip">Confidence: HIGH</span>
-        </div>
-      </div>
-    </div>
-    <div className="sample-cta">
-      Ask a similar question — <span onClick={() => onAsk("Why did failure rates spike on Tuesday between 2–4 PM IST?")}>try this one →</span>
-    </div>
-  </div>
-);
-
-// ── Tab pages ──
-const OverviewPage: FC<{ onSuggestion: (text: string) => void }> = ({ onSuggestion }) => (
-  <div className="tab-page">
-    <div className="page-header">
-      <div>
-        <div className="page-title">Payment Intelligence Overview</div>
-        <div className="page-subtitle">Live data snapshot · Feb 18, 2026 · 09:14 IST</div>
-      </div>
-      <div className="page-actions">
-        <button className="page-btn">Export</button>
-        <button className="page-btn primary">Set Alert</button>
-      </div>
-    </div>
-    <NarrativeBanner onAsk={onSuggestion} />
-    <div className="kpi-strip">
-      {KPI_CARDS.map(k => (
-        <div key={k.label} className={`kpi-card ${k.variant}`}>
-          <span className="kpi-icon">{k.icon}</span>
-          <div className="kpi-label">{k.label}</div>
-          <div className="kpi-value">{k.value}</div>
-          <div className={`kpi-delta ${k.dir}`}>{k.dir === "up" ? "▲" : "▼"} {k.delta} vs yesterday</div>
-        </div>
-      ))}
-    </div>
-    <div className="panel-card">
-      <div className="panel-card-title"><span>💡</span>Ask NEXUS AI</div>
-      <div className="suggestions">
-        {SUGGESTIONS.map(s => (
-          <button key={s.title} className={`sug-chip ${s.tag}`} onClick={() => onSuggestion(s.desc)}>
-            <div className="sug-chip-header">
-              <span className="sug-chip-icon">{s.icon}</span>
-              <div>
-                <span className={`sug-chip-tag ${s.tag}`}>{s.tagLabel}</span>
-                <strong style={{ display: "block", marginTop: 2 }}>{s.title}</strong>
-              </div>
-            </div>
-            <div className="sug-chip-desc">{s.desc}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-    <SampleConvo onAsk={onSuggestion} />
   </div>
 );
 

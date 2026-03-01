@@ -1,5 +1,5 @@
 ﻿"""
-InsightX System - Full Dynamic Pipeline v2.1
+Nexus System - Full Dynamic Pipeline v2.1
 Fixes applied:
   Issue 1: Anti-hallucination via SchemaValidator
   Issue 2: Conversation history for follow-up context
@@ -28,7 +28,7 @@ from guardrails import Guardrails
 class InsightXSystem:
     def __init__(self, csv_path: str):
         print("\n" + "="*60)
-        print("  INSIGHTX - INTELLIGENT UPI ANALYTICS v2.1")
+        print("  NEXUS - INTELLIGENT UPI ANALYTICS v2.1")
         print("="*60)
 
         self.analytics = AnalyticsEngine(csv_path)
@@ -53,7 +53,7 @@ class InsightXSystem:
         # Issue 2: Conversation memory
         self.conversation_history = []
 
-        print("\n InsightX v2.1 ready! All fixes + guardrails active.")
+        print("\n Nexus v2.1 ready! All fixes + guardrails active.")
         print("="*60 + "\n")
 
     def ask(self, question: str, session_id: str = "default", stop_event=None) -> dict:

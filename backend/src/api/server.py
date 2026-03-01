@@ -1,5 +1,5 @@
 ﻿"""
-FastAPI Server for InsightX v2.2
+FastAPI Server for Nexus v2.2
 Integrated: 5-Key Rotation + Guardrails + All 4 Issue Fixes
 """
 
@@ -20,7 +20,7 @@ from main import InsightXSystem
 from guardrails import Guardrails
 from nlp.key_manager import get_key_manager
 
-app = FastAPI(title="InsightX API", version="2.2.0")
+app = FastAPI(title="Nexus API", version="2.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -276,7 +276,7 @@ def _generate_chart_data(result, intent: str = "", question: str = "") -> tuple[
 if __name__ == "__main__":
     import uvicorn
     print("\n" + "="*60)
-    print("  INSIGHTX API SERVER v2.2")
+    print("  NEXUS API SERVER v2.2")
     print("  5-Key Rotation + Guardrails + All Fixes")
     print("="*60)
     print("  Server:   http://localhost:8000")

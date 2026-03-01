@@ -121,12 +121,12 @@ FINANCIAL_KNOWLEDGE = [
     },
     {
         "id": "insight_001",
-        "text": "InsightX dataset baseline: 250,000 transactions 2024, success rate ~95%, failure rate ~5%, fraud flag rate ~0.19%, average amount Rs 1,311. These are the baseline benchmarks.",
-        "tags": ["baseline", "dataset", "insightx", "benchmark", "overall", "average"]
+        "text": "Nexus dataset baseline: 250,000 transactions 2024, success rate ~95%, failure rate ~5%, fraud flag rate ~0.19%, average amount Rs 1,311. These are the baseline benchmarks.",
+        "tags": ["baseline", "dataset", "nexus", "benchmark", "overall", "average"]
     },
     {
         "id": "insight_002",
-        "text": "Failure rate thresholds for this dataset: above 7% is HIGH concern, 4-7% is NORMAL, below 4% is GOOD. Fraud rate above 0.3% is concerning. These apply to InsightX UPI dataset.",
+        "text": "Failure rate thresholds for this dataset: above 7% is HIGH concern, 4-7% is NORMAL, below 4% is GOOD. Fraud rate above 0.3% is concerning. These apply to the Nexus UPI dataset.",
         "tags": ["threshold", "failure_rate", "fraud_rate", "good", "high", "normal", "concern"]
     },
 ]
